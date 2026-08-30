@@ -178,7 +178,16 @@ def get_riders():
         try:
             data = resp.json()
         except Exception:
-            st.error("فشل في تحليل استجابة الـ API (HTML بدل JSON).")
+            st.error("❌ الـ API رجّع HTML بدل JSON — جلسة Cloudflare منتهية")
+            st.markdown(
+                "**الحل:** حدّث `CF_APP_SESSION` و `CF_AUTHORIZATION` "
+                "في `.streamlit/secrets.toml` من متصفح مسجّل دخول جديد، "
+                "وامسح ملف `tokens.json` ثم أعد التشغيل."
+            )
+            with st.expander("🔍 تفاصيل الرد (للتشخيص)"):
+                st.code(f"URL: {resp.url}")
+                st.code(f"Status: {resp.status_code}")
+                st.code(resp.text[:600])
             break
 
         if isinstance(data, dict):
