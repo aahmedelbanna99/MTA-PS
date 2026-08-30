@@ -32,7 +32,11 @@ st.markdown(
 # ==================== الرأس ====================
 header_cols = st.columns([1, 12])
 with header_cols[0]:
-    st.image("talabat.jpeg", width=120)
+    # لو اللوجو مش موجود أو تالف، نكمل من غير ما التطبيق يبوظ
+    try:
+        st.image("talabat.jpeg", width=120)
+    except Exception:
+        pass
 with header_cols[1]:
     st.markdown(
         '<h1 style="margin-bottom:0;">MTA Portsaid - Live Riders</h1>',
@@ -218,6 +222,11 @@ def get_tomorrow_shifts():
         "with_time_zone": "Africa/Cairo",
     }
     resp = fetch_with_auth(url, params)
+    if resp.status_code == 401:
+        # محاولة أخيرة: تجديد التوكن وإعادة المحاولة مرة تانية
+        if refresh_access_token():
+            st.cache_data.clear()
+            resp = fetch_with_auth(url, params)
     if resp.status_code != 200:
         st.warning(f"⚠️ Shifts API رجّع {resp.status_code} — فحص شيفتات بكرة مش شغال")
         st.code(resp.text[:500])
@@ -391,8 +400,8 @@ with live_map_tab:
             <b>Wallet:</b> {(r.get('wallet_info') or {}).get('balance', 'N/A')}<br>
             <b>Has Active Order:</b> {'Yes 🟢' if has_active else 'No 🔴'}<br>
             <b>Tomorrow Shift:</b> {'Yes ✅' if has_shift_tomorrow else 'No ❌'}<br>
-            <b>Completed Orders:</b> {r.get('completed_orders', 0)}<br>
-            <b>Accepted Orders:</b> {r.get('accepted_orders', 0)}
+            <b>Completed Orders:</b> {deliveries_info.get('completed_deliveries_count', deliveries_info.get('completed_deliveries', r.get('completed_orders', 0)))}<br>
+            <b>Accepted Orders:</b> {deliveries_info.get('accepted_deliveries_count', deliveries_info.get('accepted_deliveries', r.get('accepted_orders', 0)))}
         </div>
         """
 
