@@ -201,48 +201,47 @@ def get_riders():
 
 
 @st.cache_data(ttl=300)
-def get_tomorrow_shifts():
-    # جلب شيفتات الغد بتوقيت القاهرة
-    url = (
-        "https://eg.me.logisticsbackoffice.com/"
-        "api/rooster/v3/shifts"
-    )
+def get_tomorrow_shifts(rider_ids):
+    # جلب شيفتات الغد لكل مندوب على حدة (بنفس endpoint المتصفح)
+    # rider_ids: قائمة معرفات المناديب من اللايف
     cairo_tz = ZoneInfo("Africa/Cairo")
     now = datetime.now(cairo_tz)
     tomorrow = now + timedelta(days=1)
-    params = {
-        "city_id": 204,
-        "distinct_day_plans": "false",
-        "start_at": tomorrow.strftime("%Y-%m-%dT00:00:00.000Z"),
-        "end_at": tomorrow.strftime("%Y-%m-%dT23:59:59.999Z"),
-        "page": 0,
-        "size": 100,
-        "with_evaluations": "true",
-        "with_field": "id_number",
-        "with_time_zone": "Africa/Cairo",
-    }
-    resp = fetch_with_auth(url, params)
-    if resp.status_code == 401:
-        # محاولة أخيرة: تجديد التوكن وإعادة المحاولة مرة تانية
-        if refresh_access_token():
-            st.cache_data.clear()
+    start_at = tomorrow.strftime("%Y-%m-%dT00:00:00.000Z")
+    end_at = tomorrow.strftime("%Y-%m-%dT23:59:59.999Z")
+
+    riders_with_shift = set()
+    base = "https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees"
+
+    for rid in rider_ids:
+        try:
+            url = f"{base}/{int(rid)}/shifts"
+            params = {
+                "city_id": 204,
+                "start_at": start_at,
+                "end_at": end_at,
+            }
             resp = fetch_with_auth(url, params)
-    if resp.status_code != 200:
-        st.warning(f"⚠️ Shifts API رجّع {resp.status_code} — فحص شيفتات بكرة مش شغال")
-        st.code(resp.text[:500])
-        return []
-    try:
-        if "html" in resp.headers.get("Content-Type", "").lower():
-            st.warning("⚠️ Shifts API رجّع HTML — جلسة Cloudflare منتهية")
-            return []
-        data = resp.json()
-        content = data.get("content") or (data if isinstance(data, list) else [])
-        if not content:
-            st.info(f"ℹ️ Shifts API رجّع 0 شيفت لبكرة. (الرد: {str(data)[:200]})")
-        return content
-    except Exception as e:
-        st.warning(f"⚠️ خطأ في تحليل الشيفتات: {e}")
-        return []
+            if resp.status_code == 401:
+                # تجديد التوكن والمحاولة مرة أخرى
+                if refresh_access_token():
+                    st.cache_data.clear()
+                    resp = fetch_with_auth(url, params)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            # أي رد فيه شيفتات (content أو قايمة) يعني المندوب له شيفت بكرة
+            shifts = []
+            if isinstance(data, dict):
+                shifts = data.get("content") or data.get("data") or []
+            elif isinstance(data, list):
+                shifts = data
+            if shifts:
+                riders_with_shift.add(int(rid))
+        except Exception:
+            continue
+
+    return riders_with_shift
 
 
 # ==================== حالة الطيار ====================
@@ -266,24 +265,18 @@ def get_status_info(raw_status):
 
 # ==================== جلب البيانات ====================
 riders = get_riders()
-shifts = get_tomorrow_shifts()
 
-# معرفات الطيارين الذين لديهم شيفت غدًا
-tomorrow_rider_ids = set()
-for sh in shifts:
-    # الـ ID ممكن يكون في employee_id أو employeeId أو جوه dict اسمه employee
-    emp = (
-        sh.get("employee_id")
-        or sh.get("employeeId")
-        or (sh.get("employee") or {}).get("id")
-        or (sh.get("employee") or {}).get("employee_id")
-    )
+# جلب مناديب الغد من اللايف نفسه (نفس endpoint المتصفح)
+rider_ids = []
+for r in riders:
+    rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
     try:
-        tomorrow_rider_ids.add(int(emp))
+        rider_ids.append(int(rid))
     except (TypeError, ValueError):
         pass
 
-st.caption(f"📅 شيفتات بكرة: {len(shifts)} | مناديب ليهم شيفت: {len(tomorrow_rider_ids)}")
+tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
+st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
 # ==================== زر التحديث ====================
 if st.button("🔄 Refresh"):
