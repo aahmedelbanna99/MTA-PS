@@ -272,17 +272,26 @@ for r in riders:
 tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
 st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
-# ==================== زر التحديث + لوحة الأدمن ====================
-top_cols = st.columns([1, 1, 6])
-with top_cols[0]:
+# ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
+# لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
+is_admin_url = st.query_params.get("admin") == "1"
+
+if is_admin_url:
+    top_cols = st.columns([1, 1, 6])
+    with top_cols[0]:
+        if st.button("🔄 Refresh"):
+            st.cache_data.clear()
+            st.rerun()
+    with top_cols[1]:
+        if st.button("🔒 Admin"):
+            st.session_state.show_admin = not st.session_state.get("show_admin", False)
+else:
+    # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
         st.cache_data.clear()
         st.rerun()
-with top_cols[1]:
-    if st.button("🔒 Admin"):
-        st.session_state.show_admin = not st.session_state.get("show_admin", False)
 
-if st.session_state.get("show_admin", False):
+if is_admin_url and st.session_state.get("show_admin", False):
     with st.container(border=True):
         if not st.session_state.get("admin_authed", False):
             st.markdown("**دخول الأدمن**")
