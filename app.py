@@ -8,6 +8,8 @@ import os
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlencode
 
 import folium
 import pandas as pd
@@ -93,67 +95,56 @@ def build_headers():
 
 
 def refresh_access_token():
-    # تجديد التوكن باستخدام REFRESH_TOKEN (بنفس شكل الطلب الأصلي: كوكيز + يوزر إيجنت)
-    try:
-        refresh_headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0",
-            "Cookie": (
-                f"CF_AppSession={TOKENS['CF_APP_SESSION']}; "
-                f"CF_Authorization={TOKENS['CF_AUTHORIZATION']}; "
-                f"dhh_token={TOKENS['DHH_TOKEN']}; "
-                f"refresh_token={TOKENS['REFRESH_TOKEN']}"
-            ),
-        }
-        resp = requests.post(
-            "https://eg.me.logisticsbackoffice.com/api/iam-login/auth/refresh_token",
-            json={"refresh_token": TOKENS["REFRESH_TOKEN"]},
-            headers=refresh_headers,
-            timeout=30,
-        )
+    # تجديد التوكن — بنجرب الأول من غير كوكيز Cloudflare
+    # لو نجح من غيرهم، يبقى التطبيق بيتعالج لوحده حتى لو الكوكيز ماتت
+    for use_cf in (False, True):
+        try:
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            }
+            cookies = (
+                f"dhh_token={TOKENS['DHH_TOKEN']}; refresh_token={TOKENS['REFRESH_TOKEN']}"
+            )
+            if use_cf:
+                cookies += (
+                    f"; CF_AppSession={TOKENS['CF_APP_SESSION']}"
+                    f"; CF_Authorization={TOKENS['CF_AUTHORIZATION']}"
+                )
+            headers["Cookie"] = cookies
 
-        content_type = resp.headers.get("Content-Type", "")
-        if "application/json" not in content_type:
-            st.error("❌ Refresh رجّع HTML بدل JSON — جلسة Cloudflare انتهت (حدث CF_AppSession و CF_Authorization).")
-            return False
-
-        if resp.status_code not in (200, 201):
-            st.error(f"❌ Refresh فشل برمز {resp.status_code}")
-            st.code(resp.text[:800])
-            return False
-
-        data = resp.json()
-        new_token = data.get("token")
-        new_dhh = data.get("dhhToken")
-        new_refresh = data.get("refreshToken")
-
-        if not new_dhh:
-            st.error("❌ الرد مفيهوش dhhToken جديد")
-            return False
-
-        if new_token:
-            TOKENS["BEARER_TOKEN"] = new_token
-        TOKENS["DHH_TOKEN"] = new_dhh
-        if new_refresh:
-            TOKENS["REFRESH_TOKEN"] = new_refresh
-
-        save_tokens()
-        st.toast("✅ تم تحديث التوكنات تلقائيًا")
-        return True
-
-    except Exception as e:
-        st.error(f"❌ Token Refresh Error: {e}")
-        return False
+            resp = requests.post(
+                "https://eg.me.logisticsbackoffice.com/api/iam-login/auth/refresh_token",
+                json={"refresh_token": TOKENS["REFRESH_TOKEN"]},
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code in (200, 201) and "application/json" in resp.headers.get("Content-Type", ""):
+                data = resp.json()
+                new_dhh = data.get("dhhToken")
+                if not new_dhh:
+                    continue
+                if data.get("token"):
+                    TOKENS["BEARER_TOKEN"] = data["token"]
+                TOKENS["DHH_TOKEN"] = new_dhh
+                if data.get("refreshToken"):
+                    TOKENS["REFRESH_TOKEN"] = data["refreshToken"]
+                save_tokens()
+                st.toast("✅ تم تحديث التوكنات تلقائيًا")
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def fetch_with_auth(url, params):
     # طلب مع إعادة المحاولة عند 401 (تجديد التوكن ثم إعادة المحاولة)
+    resp = None
     for attempt in range(2):
         resp = requests.get(url, headers=build_headers(), params=params, timeout=30)
         if resp.status_code == 401 and attempt == 0:
             if refresh_access_token():
-                st.cache_data.clear()
                 continue
         return resp
     return resp
@@ -211,46 +202,35 @@ def get_riders():
 
 @st.cache_data(ttl=300)
 def get_tomorrow_shifts(rider_ids):
-    # جلب شيفتات الغد لكل مندوب على حدة (بنفس endpoint المتصفح)
-    # rider_ids: قائمة معرفات المناديب من اللايف
+    # جلب شيفتات الغد لكل مندوب بالتوازي (10 في نفس الوقت بدل واحد ورا التاني)
+    # بنستخدم fetch_with_auth اللي بيعالج الـ 401 بنفسه — من غير refresh يدوي مكرر
     cairo_tz = ZoneInfo("Africa/Cairo")
-    now = datetime.now(cairo_tz)
-    tomorrow = now + timedelta(days=1)
-    start_at = tomorrow.strftime("%Y-%m-%dT00:00:00.000Z")
-    end_at = tomorrow.strftime("%Y-%m-%dT23:59:59.999Z")
-
-    riders_with_shift = set()
+    tomorrow = datetime.now(cairo_tz) + timedelta(days=1)
+    params = {
+        "city_id": 204,
+        "start_at": tomorrow.strftime("%Y-%m-%dT00:00:00.000Z"),
+        "end_at": tomorrow.strftime("%Y-%m-%dT23:59:59.999Z"),
+    }
     base = "https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees"
 
-    for rid in rider_ids:
+    def check(rid):
         try:
-            url = f"{base}/{int(rid)}/shifts"
-            params = {
-                "city_id": 204,
-                "start_at": start_at,
-                "end_at": end_at,
-            }
-            resp = fetch_with_auth(url, params)
-            if resp.status_code == 401:
-                # تجديد التوكن والمحاولة مرة أخرى
-                if refresh_access_token():
-                    st.cache_data.clear()
-                    resp = fetch_with_auth(url, params)
+            resp = fetch_with_auth(f"{base}/{int(rid)}/shifts", params)
             if resp.status_code != 200:
-                continue
+                return None
             data = resp.json()
-            # أي رد فيه شيفتات (content أو قايمة) يعني المندوب له شيفت بكرة
             shifts = []
             if isinstance(data, dict):
                 shifts = data.get("content") or data.get("data") or []
             elif isinstance(data, list):
                 shifts = data
-            if shifts:
-                riders_with_shift.add(int(rid))
+            return int(rid) if shifts else None
         except Exception:
-            continue
+            return None
 
-    return riders_with_shift
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        results = list(ex.map(check, rider_ids))
+    return {r for r in results if r}
 
 
 # ==================== حالة الطيار ====================
@@ -304,7 +284,6 @@ without_order_count = 0
 break_riders = []
 
 for r in riders:
-    # المرور على كل الطيارين القادمين من الـ API مباشرة
     total_riders += 1
     status_info = get_status_info(r.get("status"))
 
@@ -357,7 +336,6 @@ with live_map_tab:
     points = []
 
     for r in filtered_riders:
-        # استخراج الإحداثيات من عدة أشكال محتملة
         loc = r.get("location") or r.get("current_location") or {}
         lat = r.get("lat") or r.get("latitude") or loc.get("lat") or loc.get("latitude")
         lng = r.get("lng") or r.get("longitude") or loc.get("lng") or loc.get("longitude")
@@ -375,7 +353,6 @@ with live_map_tab:
         deliveries_info = r.get("deliveries_info") or {}
         has_active = deliveries_info.get("has_active_deliveries", False)
 
-        # قراءة الـ ID من كل الحقول المحتملة (employee_id هو الأساسي)
         rider_id = (
             r.get("employee_id")
             or r.get("employeeId")
@@ -386,7 +363,6 @@ with live_map_tab:
         except (TypeError, ValueError):
             has_shift_tomorrow = False
 
-        # اسم المندوب (يظهر في الـ tooltip عند الوقوف بالماوس على الدبوس)
         name = (
             r.get("name")
             or r.get("rider_name")
@@ -408,7 +384,6 @@ with live_map_tab:
         """
 
         if status_info == "Working 🟢":
-            # علامة خضراء على شكل قطرة مع نقطة ملونة حسب وجود أوردر نشط
             inner_color = "white" if has_active else "red"
             icon_html = f"""
             <div style="
@@ -433,7 +408,6 @@ with live_map_tab:
                 tooltip=f"{name} ({rider_id})",
             ).add_to(m)
         elif status_info == "Break 🟡" or status_info == "Temp Offline 🟡":
-            # علامة صفراء على شكل قطرة
             icon_html = """
             <div style="
                 width: 24px; height: 24px;
@@ -457,7 +431,6 @@ with live_map_tab:
                 tooltip=f"{name} ({rider_id})",
             ).add_to(m)
         else:
-            # علامة عادية حسب الحالة
             color_map = {
                 "Late 🔴": "red",
                 "Starting 🔵": "blue",
@@ -487,14 +460,9 @@ with live_map_tab:
     st.markdown("© 2026 Created by Ahmed Elbanna")
 
 # ==================== تبويب البريكات ====================
-# ==================== تبويب البريكات ====================
-from urllib.parse import urlencode
-
-# رابط فورم جوجل معبي بالبيانات (Prefilled Link)
 FORM_BASE = "https://docs.google.com/forms/d/e/1FAIpQLSekxaUQPgiWq-Y_IPfsTx7wTANA324a2JklFJZ_Gxg9CGPaKA/viewform"
 
 def make_break_url(rid):
-    # يبني رابط الفورم معبي بالـ ID بتاع المندوب
     return FORM_BASE + "?" + urlencode({
         "entry.302135773": "شيفتات الطيارين",
         "entry.1941659317": "فك بريك",
@@ -518,7 +486,6 @@ with all_breaks_tab:
             with c3:
                 st.write(status)
             with c4:
-                # زرار فك بريك — يفتح فورم جوجل معبي بالـ ID بتاع المندوب ده
                 st.link_button("🔓 فك بريك", make_break_url(rid), use_container_width=True)
             st.divider()
     else:
