@@ -453,27 +453,6 @@ with live_map_tab:
                     st.session_state.map_filter_fallback = key
         selected_filter = st.session_state.map_filter_fallback
 
-    # ---- الأرقام (تحت الفلاتر) ----
-    row1 = st.columns(4)
-    with row1[0]:
-        st.metric("Total Riders", total_riders)
-    with row1[1]:
-        st.metric("🟢 Working", working_count)
-    with row1[2]:
-        st.metric("🟡 Temp / Break", temp_offline_count + break_count)
-    with row1[3]:
-        st.metric("🔵 Starting", starting_count)
-
-    row2 = st.columns(4)
-    with row2[0]:
-        st.metric("🔴 Late", late_count)
-    with row2[1]:
-        st.metric("📦 With Order", with_order_count)
-    with row2[2]:
-        st.metric("⚪ Without Order", without_order_count)
-    with row2[3]:
-        st.metric("☕ Break", break_count)
-
     filtered_riders = [r for r in riders if rider_matches_filter(r, selected_filter)]
 
     m = folium.Map(location=[31.2653, 32.3019], zoom_start=13)
