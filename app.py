@@ -45,6 +45,29 @@ with header_cols[1]:
         unsafe_allow_html=True,
     )
 
+# ==================== حماية الدخول (باسورد لأكتر من مشرف) ====================
+# القيمة في secrets.toml بتاخد كذا باسورد مفصولين بفاصلة، مثال:
+# SUPERVISOR_PASSWORDS = "باسورد_الأول,باسورد_التاني"
+SUPERVISOR_PASSWORDS = [
+    p.strip()
+    for p in st.secrets.get("SUPERVISOR_PASSWORDS", "").split(",")
+    if p.strip()
+]
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.markdown("### 🔒 محتاج تسجل دخول")
+    login_pwd = st.text_input("كلمة السر", type="password", key="login_pwd_input")
+    if st.button("دخول", key="login_submit_btn"):
+        if SUPERVISOR_PASSWORDS and login_pwd in SUPERVISOR_PASSWORDS:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("❌ كلمة السر غلط")
+    st.stop()
+
 # ==================== التوكنات (tokens.json له الأولوية) ====================
 TOKENS_FILE = "tokens.json"
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
