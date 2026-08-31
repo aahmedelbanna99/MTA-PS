@@ -195,6 +195,11 @@ def get_riders():
         resp = fetch_with_auth(url, {"page": page, "size": 100})
         if resp.status_code != 200:
             st.error(f"خطأ في جلب الطيارين: {resp.status_code} (صفحة {page})")
+            with st.expander("🔍 تفاصيل الرد (للتشخيص)"):
+                st.code(f"URL: {resp.url}")
+                st.code(f"Status: {resp.status_code}")
+                st.code(f"Response headers Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+                st.code(resp.text[:800])
             break
         try:
             data = resp.json()
