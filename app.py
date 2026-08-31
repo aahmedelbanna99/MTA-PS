@@ -375,8 +375,85 @@ for r in riders:
 # ==================== التبويبات ====================
 live_map_tab, all_breaks_tab = st.tabs(["🗺️ Live Map", "☕ All Breaks"])
 
+
+def rider_matches_filter(r, filt):
+    # هل الطيار مطابق للفلتر المختار؟
+    if filt == "all":
+        return True
+    status_info = get_status_info(r.get("status"))
+    deliveries_info = r.get("deliveries_info") or {}
+    has_active = deliveries_info.get("has_active_deliveries", False)
+    if filt == "working":
+        return status_info == "Working 🟢"
+    if filt == "late":
+        return status_info == "Late 🔴"
+    if filt == "break":
+        return status_info in ("Break 🟡", "Temp Offline 🟡")
+    if filt == "starting":
+        return status_info == "Starting 🔵"
+    if filt == "with_order":
+        return has_active
+    if filt == "without_order":
+        return not has_active
+    return True
+
+
 # ==================== تبويب الخريطة ====================
 with live_map_tab:
+    # ---- شرائط الفلترة (Pills) بشكل غامق ----
+    st.markdown(
+        """
+        <style>
+            div[data-testid="stPills"] button {
+                background-color: #F7F7F5 !important;
+                border: none !important;
+                border-radius: 20px !important;
+                color: #1a1a1a !important;
+            }
+            div[data-testid="stPills"] button[aria-checked="true"] {
+                background-color: #1a1a1a !important;
+                color: #fff !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    filter_options = [
+        ("all", f"الكل · {total_riders}"),
+        ("working", f"🟢 Working · {working_count}"),
+        ("late", f"🔴 Late · {late_count}"),
+        ("break", f"🟡 Break · {break_count}"),
+        ("starting", f"🔵 Starting · {starting_count}"),
+        ("with_order", f"📦 With order · {with_order_count}"),
+        ("without_order", f"⚪ Without order · {without_order_count}"),
+    ]
+    filter_keys = [f[0] for f in filter_options]
+    filter_labels = {f[0]: f[1] for f in filter_options}
+
+    if hasattr(st, "pills"):
+        selected_filter = st.pills(
+            "فلترة الخريطة",
+            options=filter_keys,
+            format_func=lambda k: filter_labels[k],
+            default="all",
+            label_visibility="collapsed",
+            key="map_filter_pills",
+        )
+        if not selected_filter:
+            selected_filter = "all"
+    else:
+        # نسخة بديلة (fallback) لو الإصدار قديم ومفيهوش st.pills
+        if "map_filter_fallback" not in st.session_state:
+            st.session_state.map_filter_fallback = "all"
+        pill_cols = st.columns(len(filter_options))
+        for i, (key, label) in enumerate(filter_options):
+            with pill_cols[i]:
+                if st.button(label, key=f"pill_{key}"):
+                    st.session_state.map_filter_fallback = key
+        selected_filter = st.session_state.map_filter_fallback
+
+    # ---- الأرقام (تحت الفلاتر) ----
     row1 = st.columns(4)
     with row1[0]:
         st.metric("Total Riders", total_riders)
@@ -397,7 +474,7 @@ with live_map_tab:
     with row2[3]:
         st.metric("☕ Break", break_count)
 
-    filtered_riders = riders
+    filtered_riders = [r for r in riders if rider_matches_filter(r, selected_filter)]
 
     m = folium.Map(location=[31.2653, 32.3019], zoom_start=13)
     points = []
