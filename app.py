@@ -47,23 +47,30 @@ with header_cols[1]:
 
 # ==================== التوكنات (tokens.json له الأولوية) ====================
 TOKENS_FILE = "tokens.json"
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
 
 # القيم الافتراضية من st.secrets إن وجدت
 TOKENS = {
     "BEARER_TOKEN": st.secrets.get("BEARER_TOKEN", ""),
     "DHH_TOKEN": st.secrets.get("DHH_TOKEN", ""),
     "REFRESH_TOKEN": st.secrets.get("REFRESH_TOKEN", ""),
-    # كوكيز Cloudflare (من secrets دايمًا — مبتتحدثش تلقائي)
+    # كوكيز Cloudflare (تبدأ من secrets، لكن ممكن تتحدث من لوحة الأدمن وتتحفظ في tokens.json)
     "CF_APP_SESSION": st.secrets.get("CF_APP_SESSION", ""),
     "CF_AUTHORIZATION": st.secrets.get("CF_AUTHORIZATION", ""),
 }
 
-# tokens.json له الأولوية على st.secrets
+# tokens.json له الأولوية على st.secrets (بما فيها كوكيز Cloudflare بعد التعديل)
 if os.path.exists(TOKENS_FILE):
     try:
         with open(TOKENS_FILE, "r") as f:
             saved = json.load(f)
-        for k in ("BEARER_TOKEN", "DHH_TOKEN", "REFRESH_TOKEN"):
+        for k in (
+            "BEARER_TOKEN",
+            "DHH_TOKEN",
+            "REFRESH_TOKEN",
+            "CF_APP_SESSION",
+            "CF_AUTHORIZATION",
+        ):
             if saved.get(k):
                 TOKENS[k] = saved[k]
     except Exception:
@@ -171,9 +178,7 @@ def get_riders():
         except Exception:
             st.error("❌ الـ API رجّع HTML بدل JSON — جلسة Cloudflare منتهية")
             st.markdown(
-                "**الحل:** حدّث `CF_APP_SESSION` و `CF_AUTHORIZATION` "
-                "في `.streamlit/secrets.toml` من متصفح مسجّل دخول جديد، "
-                "وامسح ملف `tokens.json` ثم أعد التشغيل."
+                "**الحل:** اضغط زرار 🔒 Admin تحت وحدّث الكوكيز الجديدة."
             )
             with st.expander("🔍 تفاصيل الرد (للتشخيص)"):
                 st.code(f"URL: {resp.url}")
@@ -267,10 +272,63 @@ for r in riders:
 tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
 st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
-# ==================== زر التحديث ====================
-if st.button("🔄 Refresh"):
-    st.cache_data.clear()
-    st.rerun()
+# ==================== زر التحديث + لوحة الأدمن ====================
+top_cols = st.columns([1, 1, 6])
+with top_cols[0]:
+    if st.button("🔄 Refresh"):
+        st.cache_data.clear()
+        st.rerun()
+with top_cols[1]:
+    if st.button("🔒 Admin"):
+        st.session_state.show_admin = not st.session_state.get("show_admin", False)
+
+if st.session_state.get("show_admin", False):
+    with st.container(border=True):
+        if not st.session_state.get("admin_authed", False):
+            st.markdown("**دخول الأدمن**")
+            pwd = st.text_input(
+                "كلمة السر", type="password", key="admin_pwd_input"
+            )
+            if st.button("دخول", key="admin_login_btn"):
+                if ADMIN_PASSWORD and pwd == ADMIN_PASSWORD:
+                    st.session_state.admin_authed = True
+                    st.rerun()
+                else:
+                    st.error("❌ كلمة السر غلط")
+        else:
+            st.success("✅ مسجل دخول كأدمن")
+            st.caption("الصق قيم الكوكيز الجديدة اللي جبتها من المتصفح بعد تسجيل الدخول")
+            new_cf_session = st.text_input(
+                "CF_AppSession الجديد", key="new_cf_session"
+            )
+            new_cf_auth = st.text_area(
+                "CF_Authorization الجديد", key="new_cf_auth", height=100
+            )
+            btn_cols = st.columns(2)
+            with btn_cols[0]:
+                if st.button("💾 حفظ وتحديث", key="save_cookies_btn"):
+                    updated = False
+                    if new_cf_session.strip():
+                        TOKENS["CF_APP_SESSION"] = new_cf_session.strip()
+                        updated = True
+                    if new_cf_auth.strip():
+                        TOKENS["CF_AUTHORIZATION"] = new_cf_auth.strip()
+                        updated = True
+                    if updated:
+                        save_tokens()
+                        st.cache_data.clear()
+                        st.success("✅ تم تحديث الكوكيز بنجاح")
+                        st.session_state.show_admin = False
+                        st.session_state.admin_authed = False
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ محتاج تحط قيمة واحدة على الأقل")
+            with btn_cols[1]:
+                if st.button("🚪 خروج", key="admin_logout_btn"):
+                    st.session_state.show_admin = False
+                    st.session_state.admin_authed = False
+                    st.rerun()
 
 # ==================== عدّ الطيارين (بدون فلترة مكتب) ====================
 total_riders = 0
