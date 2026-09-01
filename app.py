@@ -305,7 +305,7 @@ st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ل
 is_admin_url = st.query_params.get("admin") == "1"
 
 if is_admin_url:
-    top_cols = st.columns([1, 1, 1, 5])
+    top_cols = st.columns([1, 1, 1, 1, 4])
     with top_cols[0]:
         if st.button("🔄 Refresh"):
             st.cache_data.clear()
@@ -320,6 +320,20 @@ if is_admin_url:
                 st.info(f"IP بتاع السيرفر: {ip_resp.json().get('ip')}")
             except Exception as e:
                 st.error(f"مقدرش أجيب الـ IP: {e}")
+    with top_cols[3]:
+        if st.button("🔍 Raw Data"):
+            sample = None
+            for r in riders:
+                di = r.get("deliveries_info") or {}
+                if di.get("has_active_deliveries"):
+                    sample = r
+                    break
+            if not sample and riders:
+                sample = riders[0]
+            if sample:
+                st.json(sample)
+            else:
+                st.warning("مفيش بيانات طيارين لعرضها دلوقتي")
 else:
     # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
@@ -648,4 +662,3 @@ with all_breaks_tab:
             st.divider()
     else:
         st.info("🟢 No riders are currently on break.")
-
