@@ -305,7 +305,7 @@ st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ل
 is_admin_url = st.query_params.get("admin") == "1"
 
 if is_admin_url:
-    top_cols = st.columns([1, 1, 6])
+    top_cols = st.columns([1, 1, 1, 5])
     with top_cols[0]:
         if st.button("🔄 Refresh"):
             st.cache_data.clear()
@@ -313,6 +313,13 @@ if is_admin_url:
     with top_cols[1]:
         if st.button("🔒 Admin"):
             st.session_state.show_admin = not st.session_state.get("show_admin", False)
+    with top_cols[2]:
+        if st.button("🌐 IP"):
+            try:
+                ip_resp = requests.get("https://api.ipify.org?format=json", timeout=10)
+                st.info(f"IP بتاع السيرفر: {ip_resp.json().get('ip')}")
+            except Exception as e:
+                st.error(f"مقدرش أجيب الـ IP: {e}")
 else:
     # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
@@ -641,3 +648,4 @@ with all_breaks_tab:
             st.divider()
     else:
         st.info("🟢 No riders are currently on break.")
+
