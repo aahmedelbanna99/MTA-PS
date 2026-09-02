@@ -58,14 +58,14 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    st.markdown("### 🔒 محتاج تسجل دخول")
-    login_pwd = st.text_input("كلمة السر", type="password", key="login_pwd_input")
-    if st.button("دخول", key="login_submit_btn"):
+    st.markdown("### 🔒 Sign in")
+    login_pwd = st.text_input("Password", type="password", key="login_pwd_input")
+    if st.button("Go", key="login_submit_btn"):
         if SUPERVISOR_PASSWORDS and login_pwd in SUPERVISOR_PASSWORDS:
             st.session_state.authenticated = True
             st.rerun()
         else:
-            st.error("❌ كلمة السر غلط")
+            st.error("❌ Wrong password")
     st.stop()
 
 # ==================== التوكنات (tokens.json له الأولوية) ====================
@@ -695,13 +695,11 @@ with unassigned_tab:
     elif not missing_core:
         st.success("✅ كل المناديب الظاهرين دلوقتي حاططين شيفت بكرة")
     else:
-        st.write(f"⚠️ **{len(missing_core)}** من المناديب الظاهرين دلوقتي لسه محطوش شيفت بكرة")
-        for rid in missing_core:
-            name = rider_names_by_id.get(rid, "مش معروف الاسم")
-            c1, c2 = st.columns([1.2, 4])
-            with c1:
-                st.write(f"**{rid}**")
-            with c2:
-                st.write(name)
-            st.divider()
+        st.write(f"المناديب الي مش حاجزه شيفت بكره : {len(missing_core)}")
+        table_data = [
+            {"ID": rid, "Name": rider_names_by_id.get(rid, "مش معروف الاسم")}
+            for rid in missing_core
+        ]
+        df_missing = pd.DataFrame(table_data)
+        st.dataframe(df_missing, hide_index=True, use_container_width=True)
 
