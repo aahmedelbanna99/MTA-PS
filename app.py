@@ -63,10 +63,25 @@ if not st.session_state.authenticated:
     if st.button("دخول", key="login_submit_btn"):
         if SUPERVISOR_PASSWORDS and login_pwd in SUPERVISOR_PASSWORDS:
             st.session_state.authenticated = True
+            st.session_state.show_welcome = True
             st.rerun()
         else:
             st.error("❌ كلمة السر غلط")
     st.stop()
+
+if st.session_state.get("show_welcome", False):
+    welcome_cols = st.columns([1, 5])
+    with welcome_cols[0]:
+        try:
+            st.image("talabat.jpeg", width=90)
+        except Exception:
+            pass
+    with welcome_cols[1]:
+        st.markdown(
+            '<h3 style="margin-top:15px;">👋 أهلاً بيك في MTA Portsaid</h3>',
+            unsafe_allow_html=True,
+        )
+    st.session_state.show_welcome = False
 
 # ==================== التوكنات (tokens.json له الأولوية) ====================
 TOKENS_FILE = "tokens.json"
@@ -355,7 +370,17 @@ if is_admin_url and st.session_state.get("show_admin", False):
                     st.error("❌ كلمة السر غلط")
         else:
             st.success("✅ مسجل دخول كأدمن")
-            st.caption("الصق قيم الكوكيز الجديدة اللي جبتها من المتصفح بعد تسجيل الدخول")
+            st.caption("الصق القيم الجديدة اللي جبتها من المتصفح بعد تسجيل الدخول (اسيب أي خانة فاضية لو مش عايز تحدثها)")
+            new_bearer = st.text_area(
+                "BEARER_TOKEN الجديد",
+                key="new_bearer",
+                height=100,
+            )
+            new_dhh = st.text_area(
+                "DHH_TOKEN الجديد",
+                key="new_dhh",
+                height=100,
+            )
             new_cf_session = st.text_input(
                 "CF_AppSession الجديد", key="new_cf_session"
             )
@@ -366,6 +391,12 @@ if is_admin_url and st.session_state.get("show_admin", False):
             with btn_cols[0]:
                 if st.button("💾 حفظ وتحديث", key="save_cookies_btn"):
                     updated = False
+                    if new_bearer.strip():
+                        TOKENS["BEARER_TOKEN"] = new_bearer.strip()
+                        updated = True
+                    if new_dhh.strip():
+                        TOKENS["DHH_TOKEN"] = new_dhh.strip()
+                        updated = True
                     if new_cf_session.strip():
                         TOKENS["CF_APP_SESSION"] = new_cf_session.strip()
                         updated = True
@@ -375,7 +406,7 @@ if is_admin_url and st.session_state.get("show_admin", False):
                     if updated:
                         save_tokens()
                         st.cache_data.clear()
-                        st.success("✅ تم تحديث الكوكيز بنجاح")
+                        st.success("✅ تم تحديث القيم بنجاح")
                         st.session_state.show_admin = False
                         st.session_state.admin_authed = False
                         time.sleep(1)
