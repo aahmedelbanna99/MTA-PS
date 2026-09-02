@@ -355,6 +355,15 @@ if is_admin_url:
                 f"CF_APP_SESSION: {mask(TOKENS.get('CF_APP_SESSION'))}\n"
                 f"tokens.json موجود: {os.path.exists(TOKENS_FILE)}"
             )
+        if st.button("🗑️ امسح tokens.json"):
+            try:
+                if os.path.exists(TOKENS_FILE):
+                    os.remove(TOKENS_FILE)
+                    st.success("✅ اتمسح! دوس Refresh دلوقتي")
+                else:
+                    st.info("مش موجود أصلاً")
+            except Exception as e:
+                st.error(f"مقدرش أمسحه: {e}")
 else:
     # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
@@ -763,3 +772,4 @@ with unassigned_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
+
