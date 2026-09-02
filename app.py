@@ -63,25 +63,10 @@ if not st.session_state.authenticated:
     if st.button("دخول", key="login_submit_btn"):
         if SUPERVISOR_PASSWORDS and login_pwd in SUPERVISOR_PASSWORDS:
             st.session_state.authenticated = True
-            st.session_state.show_welcome = True
             st.rerun()
         else:
             st.error("❌ كلمة السر غلط")
     st.stop()
-
-if st.session_state.get("show_welcome", False):
-    welcome_cols = st.columns([1, 5])
-    with welcome_cols[0]:
-        try:
-            st.image("talabat.jpeg", width=90)
-        except Exception:
-            pass
-    with welcome_cols[1]:
-        st.markdown(
-            '<h3 style="margin-top:15px;">👋 أهلاً بيك في MTA Portsaid</h3>',
-            unsafe_allow_html=True,
-        )
-    st.session_state.show_welcome = False
 
 # ==================== التوكنات (tokens.json له الأولوية) ====================
 TOKENS_FILE = "tokens.json"
@@ -693,3 +678,4 @@ with all_breaks_tab:
             st.divider()
     else:
         st.info("🟢 No riders are currently on break.")
+
