@@ -288,17 +288,35 @@ def get_status_info(raw_status):
 # ==================== جلب البيانات ====================
 riders = get_riders()
 
+# ==================== الفريق الأساسي (core team) ====================
+# القيم في secrets.toml مفصولة بفاصلة، مثال:
+# CORE_RIDER_IDS = "781182,873477,2516203"
+CORE_RIDER_IDS = [
+    int(x.strip())
+    for x in st.secrets.get("CORE_RIDER_IDS", "").split(",")
+    if x.strip().isdigit()
+]
+
 # جلب مناديب الغد من اللايف نفسه (نفس endpoint المتصفح)
 rider_ids = []
+rider_names_by_id = {}
 for r in riders:
     rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
     try:
-        rider_ids.append(int(rid))
+        rid_int = int(rid)
+        rider_ids.append(rid_int)
+        rider_names_by_id[rid_int] = (
+            r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
+        )
     except (TypeError, ValueError):
         pass
 
-tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
+# نضيف الفريق الأساسي حتى لو مش شغالين دلوقتي، عشان نتأكد من شيفت بكرة بتاعهم
+ids_to_check = sorted(set(rider_ids) | set(CORE_RIDER_IDS))
+tomorrow_rider_ids = get_tomorrow_shifts(ids_to_check)
 st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
+
+missing_core = [rid for rid in CORE_RIDER_IDS if rid not in tomorrow_rider_ids]
 
 # ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
 # لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
@@ -438,7 +456,9 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab = st.tabs(["🗺️ Live Map", "☕ All Breaks"])
+live_map_tab, all_breaks_tab, unassigned_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "📋 Unassigned"]
+)
 
 
 def rider_matches_filter(r, filt):
@@ -678,4 +698,23 @@ with all_breaks_tab:
             st.divider()
     else:
         st.info("🟢 No riders are currently on break.")
+
+with unassigned_tab:
+    if not CORE_RIDER_IDS:
+        st.info(
+            "مفيش فريق أساسي متحدد. ضيف أرقام المناديب في secrets.toml "
+            "باسم CORE_RIDER_IDS مفصولين بفاصلة، مثال: 781182,873477"
+        )
+    elif not missing_core:
+        st.success("✅ كل الفريق الأساسي حاطط شيفت بكرة")
+    else:
+        st.write(f"⚠️ **{len(missing_core)}** من الفريق الأساسي لسه محطوش شيفت بكرة")
+        for rid in missing_core:
+            name = rider_names_by_id.get(rid, "مش معروف الاسم")
+            c1, c2 = st.columns([1.2, 4])
+            with c1:
+                st.write(f"**{rid}**")
+            with c2:
+                st.write(name)
+            st.divider()
 
