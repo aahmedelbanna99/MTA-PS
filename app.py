@@ -313,7 +313,7 @@ missing_core = [rid for rid in rider_ids if rid not in tomorrow_rider_ids]
 is_admin_url = st.query_params.get("admin") == "1"
 
 if is_admin_url:
-    top_cols = st.columns([1, 1, 1, 1, 4])
+    top_cols = st.columns([1, 1, 1, 1, 1, 3])
     with top_cols[0]:
         if st.button("🔄 Refresh"):
             st.cache_data.clear()
@@ -342,6 +342,19 @@ if is_admin_url:
                 st.json(sample)
             else:
                 st.warning("مفيش بيانات طيارين لعرضها دلوقتي")
+    with top_cols[4]:
+        if st.button("🔑 Tokens"):
+            def mask(v):
+                if not v:
+                    return "(فاضي)"
+                return f"{v[:15]}...{v[-15:]} (طول: {len(v)})"
+            st.code(
+                f"BEARER_TOKEN: {mask(TOKENS.get('BEARER_TOKEN'))}\n"
+                f"DHH_TOKEN: {mask(TOKENS.get('DHH_TOKEN'))}\n"
+                f"CF_AUTHORIZATION: {mask(TOKENS.get('CF_AUTHORIZATION'))}\n"
+                f"CF_APP_SESSION: {mask(TOKENS.get('CF_APP_SESSION'))}\n"
+                f"tokens.json موجود: {os.path.exists(TOKENS_FILE)}"
+            )
 else:
     # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
@@ -750,4 +763,3 @@ with unassigned_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
-
