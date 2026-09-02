@@ -696,29 +696,23 @@ with unassigned_tab:
         st.success("✅ كل المناديب الظاهرين دلوقتي حاططين شيفت بكرة")
     else:
         st.write(f"المناديب الي مش حاجزه شيفت بكره : {len(missing_core)}")
-        table_data = [
-            {"ID": rid, "Name": rider_names_by_id.get(rid, "مش معروف الاسم")}
+        rows_html = "".join(
+            f"<tr><td style='text-align:center; padding:8px; border-bottom:1px solid #ddd; width:100px;'>{rid}</td>"
+            f"<td style='text-align:center; padding:8px; border-bottom:1px solid #ddd;'>{rider_names_by_id.get(rid, 'مش معروف الاسم')}</td></tr>"
             for rid in missing_core
-        ]
-        df_missing = pd.DataFrame(table_data)
-        st.dataframe(
-            df_missing,
-            hide_index=True,
-            use_container_width=True,
-            column_config={
-                "ID": st.column_config.NumberColumn("ID", width="small"),
-                "Name": st.column_config.TextColumn("Name", width="large"),
-            },
         )
-        st.markdown(
-            """
-            <style>
-                div[data-testid="stDataFrame"] [data-testid="stDataFrameCell"] {
-                    justify-content: center;
-                    text-align: center;
-                }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
+        table_html = f"""
+        <table style="width:100%; border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;">
+            <thead>
+                <tr>
+                    <th style="text-align:center; padding:8px; border-bottom:2px solid #999; width:100px;">ID</th>
+                    <th style="text-align:center; padding:8px; border-bottom:2px solid #999;">Name</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+        """
+        st.markdown(table_html, unsafe_allow_html=True)
 
