@@ -701,5 +701,24 @@ with unassigned_tab:
             for rid in missing_core
         ]
         df_missing = pd.DataFrame(table_data)
-        st.dataframe(df_missing, hide_index=True, use_container_width=True)
+        st.dataframe(
+            df_missing,
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "ID": st.column_config.NumberColumn("ID", width="small"),
+                "Name": st.column_config.TextColumn("Name", width="large"),
+            },
+        )
+        st.markdown(
+            """
+            <style>
+                div[data-testid="stDataFrame"] [data-testid="stDataFrameCell"] {
+                    justify-content: center;
+                    text-align: center;
+                }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
