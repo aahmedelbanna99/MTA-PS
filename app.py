@@ -288,15 +288,6 @@ def get_status_info(raw_status):
 # ==================== جلب البيانات ====================
 riders = get_riders()
 
-# ==================== الفريق الأساسي (core team) ====================
-# القيم في secrets.toml مفصولة بفاصلة، مثال:
-# CORE_RIDER_IDS = "781182,873477,2516203"
-CORE_RIDER_IDS = [
-    int(x.strip())
-    for x in st.secrets.get("CORE_RIDER_IDS", "").split(",")
-    if x.strip().isdigit()
-]
-
 # جلب مناديب الغد من اللايف نفسه (نفس endpoint المتصفح)
 rider_ids = []
 rider_names_by_id = {}
@@ -311,12 +302,11 @@ for r in riders:
     except (TypeError, ValueError):
         pass
 
-# نضيف الفريق الأساسي حتى لو مش شغالين دلوقتي، عشان نتأكد من شيفت بكرة بتاعهم
-ids_to_check = sorted(set(rider_ids) | set(CORE_RIDER_IDS))
-tomorrow_rider_ids = get_tomorrow_shifts(ids_to_check)
+# نتأكد من شيفت بكرة لكل المناديب الظاهرين على الخريطة دلوقتي
+tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
 st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
-missing_core = [rid for rid in CORE_RIDER_IDS if rid not in tomorrow_rider_ids]
+missing_core = [rid for rid in rider_ids if rid not in tomorrow_rider_ids]
 
 # ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
 # لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
@@ -700,15 +690,12 @@ with all_breaks_tab:
         st.info("🟢 No riders are currently on break.")
 
 with unassigned_tab:
-    if not CORE_RIDER_IDS:
-        st.info(
-            "مفيش فريق أساسي متحدد. ضيف أرقام المناديب في secrets.toml "
-            "باسم CORE_RIDER_IDS مفصولين بفاصلة، مثال: 781182,873477"
-        )
+    if not rider_ids:
+        st.info("مفيش مناديب ظاهرين دلوقتي على الخريطة عشان نتأكد من شيفتهم بكرة")
     elif not missing_core:
-        st.success("✅ كل الفريق الأساسي حاطط شيفت بكرة")
+        st.success("✅ كل المناديب الظاهرين دلوقتي حاططين شيفت بكرة")
     else:
-        st.write(f"⚠️ **{len(missing_core)}** من الفريق الأساسي لسه محطوش شيفت بكرة")
+        st.write(f"⚠️ **{len(missing_core)}** من المناديب الظاهرين دلوقتي لسه محطوش شيفت بكرة")
         for rid in missing_core:
             name = rider_names_by_id.get(rid, "مش معروف الاسم")
             c1, c2 = st.columns([1.2, 4])
