@@ -412,6 +412,41 @@ if is_admin_url and st.session_state.get("show_admin", False):
                     st.session_state.admin_authed = False
                     st.rerun()
 
+            st.divider()
+            st.caption("🔍 تشخيص مؤقت: شوف شكل بيانات شيفت مندوب في يوم معين")
+            debug_rid = st.text_input("Employee ID", key="debug_shift_rid")
+            debug_date = st.text_input(
+                "التاريخ (YYYY-MM-DD)", value="2026-09-01", key="debug_shift_date"
+            )
+            if st.button("جيب بيانات الشيفت", key="debug_shift_btn"):
+                if debug_rid.strip():
+                    cairo_tz = ZoneInfo("Africa/Cairo")
+                    day_start = datetime.strptime(
+                        debug_date.strip(), "%Y-%m-%d"
+                    ).replace(tzinfo=cairo_tz)
+                    day_end = day_start + timedelta(days=1, seconds=-1)
+                    start_utc = day_start.astimezone(ZoneInfo("UTC"))
+                    end_utc = day_end.astimezone(ZoneInfo("UTC"))
+                    debug_url = (
+                        f"https://eg.me.logisticsbackoffice.com/api/rooster/v3/"
+                        f"employees/{debug_rid.strip()}/shifts"
+                    )
+                    debug_resp = fetch_with_auth(
+                        debug_url,
+                        {
+                            "city_id": 204,
+                            "start_at": start_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                            "end_at": end_utc.strftime("%Y-%m-%dT%H:%M:%S.999Z"),
+                        },
+                    )
+                    st.code(f"Status: {debug_resp.status_code}")
+                    try:
+                        st.json(debug_resp.json())
+                    except Exception:
+                        st.code(debug_resp.text[:1500])
+                else:
+                    st.warning("حط Employee ID الأول")
+
 # ==================== عدّ الطيارين (بدون فلترة مكتب) ====================
 total_riders = 0
 working_count = 0
