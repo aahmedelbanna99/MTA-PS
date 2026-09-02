@@ -697,16 +697,16 @@ with unassigned_tab:
     else:
         st.write(f"المناديب الي مش حاجزه شيفت بكره : {len(missing_core)}")
         rows_html = "".join(
-            f"<tr><td style='text-align:center; padding:8px; border-bottom:1px solid #ddd; width:100px;'>{rid}</td>"
-            f"<td style='text-align:center; padding:8px; border-bottom:1px solid #ddd;'>{rider_names_by_id.get(rid, 'مش معروف الاسم')}</td></tr>"
+            f"<tr><td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{rid}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{rider_names_by_id.get(rid, 'مش معروف الاسم')}</td></tr>"
             for rid in missing_core
         )
         table_html = f"""
-        <table style="width:100%; border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px;">
+        <table style="border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; width:auto;">
             <thead>
                 <tr>
-                    <th style="text-align:center; padding:8px; border-bottom:2px solid #999; width:100px;">ID</th>
-                    <th style="text-align:center; padding:8px; border-bottom:2px solid #999;">Name</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; width:100px;">ID</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
                 </tr>
             </thead>
             <tbody>
