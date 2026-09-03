@@ -520,6 +520,7 @@ with_order_count = 0
 without_order_count = 0
 break_riders = []
 late_riders = []
+temp_riders = []
 
 for r in riders:
     total_riders += 1
@@ -532,6 +533,7 @@ for r in riders:
         break_riders.append(r)
     elif status_info == "Temp Offline 🟡":
         temp_offline_count += 1
+        temp_riders.append(r)
     elif status_info == "Starting 🔵":
         starting_count += 1
     elif status_info == "Late 🔴":
@@ -545,8 +547,8 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab = st.tabs(
-    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned"]
+live_map_tab, all_breaks_tab, all_late_tab, all_temp_tab, unassigned_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "🟡 All Temp", "📋 Unassigned"]
 )
 
 
@@ -815,6 +817,21 @@ with all_late_tab:
             st.divider()
     else:
         st.info("🟢 No riders are currently late.")
+
+with all_temp_tab:
+    if temp_riders:
+        st.write(f"🟡 Riders temp offline: **{len(temp_riders)}**")
+        for r in temp_riders:
+            rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
+            name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
+            c1, c2 = st.columns([1.2, 3])
+            with c1:
+                st.write(f"**{rid}**")
+            with c2:
+                st.write(name)
+            st.divider()
+    else:
+        st.info("🟢 No riders are currently temp offline.")
 
 with unassigned_tab:
     if not rider_ids:
