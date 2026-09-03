@@ -845,7 +845,7 @@ with all_breaks_tab:
             with c2:
                 st.write(name)
             with c3:
-                st.link_button("🔓 فك تمب", make_temp_url(rid), use_container_width=True)
+                st.link_button("🔓 فك بريك", make_break_url(rid), use_container_width=True)
             st.divider()
     else:
         st.info("🟢 No riders are currently on break.")
