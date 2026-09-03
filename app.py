@@ -180,6 +180,26 @@ def fetch_with_auth(url, params):
     return resp
 
 
+# ==================== تنبيه تليجرام عند انتهاء الجلسة ====================
+TELEGRAM_BOT_TOKEN = st.secrets.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = st.secrets.get("TELEGRAM_CHAT_ID", "")
+
+
+@st.cache_data(ttl=1800)  # يبعت تنبيه واحد بس كل نص ساعة عشان ميكررش مع كل ريفريش
+def send_telegram_alert(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": message},
+            timeout=10,
+        )
+        return True
+    except Exception:
+        return False
+
+
 # ==================== دوال جلب البيانات ====================
 @st.cache_data(ttl=60)
 def get_riders():
@@ -195,6 +215,10 @@ def get_riders():
         resp = fetch_with_auth(url, {"page": page, "size": 100})
         if resp.status_code != 200:
             st.error(f"خطأ في جلب الطيارين: {resp.status_code} (صفحة {page})")
+            send_telegram_alert(
+                f"⚠️ MTA Portsaid: خطأ {resp.status_code} في جلب الطيارين - "
+                f"التوكن محتاج تحديث"
+            )
             with st.expander("🔍 تفاصيل الرد (للتشخيص)"):
                 st.code(f"URL: {resp.url}")
                 st.code(f"Status: {resp.status_code}")
@@ -205,6 +229,9 @@ def get_riders():
             data = resp.json()
         except Exception:
             st.error("❌ الـ API رجّع HTML بدل JSON — جلسة Cloudflare منتهية")
+            send_telegram_alert(
+                "⚠️ MTA Portsaid: جلسة Cloudflare منتهية - محتاج تحديث الكوكيز"
+            )
             st.markdown(
                 "**الحل:** اضغط زرار 🔒 Admin تحت وحدّث الكوكيز الجديدة."
             )
