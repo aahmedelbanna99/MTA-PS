@@ -353,6 +353,7 @@ if is_admin_url:
                 f"DHH_TOKEN: {mask(TOKENS.get('DHH_TOKEN'))}\n"
                 f"CF_AUTHORIZATION: {mask(TOKENS.get('CF_AUTHORIZATION'))}\n"
                 f"CF_APP_SESSION: {mask(TOKENS.get('CF_APP_SESSION'))}\n"
+                f"REFRESH_TOKEN: {mask(TOKENS.get('REFRESH_TOKEN'))}\n"
                 f"tokens.json موجود: {os.path.exists(TOKENS_FILE)}"
             )
         if st.button("🗑️ امسح tokens.json"):
@@ -802,3 +803,4 @@ with unassigned_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
+
