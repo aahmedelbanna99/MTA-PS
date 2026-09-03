@@ -768,21 +768,24 @@ def make_break_url(rid):
         "usp": "pp_url",
     })
 
+
+def make_late_warning_url(phone, name):
+    digits = "".join(ch for ch in str(phone) if ch.isdigit())
+    message = f"تحذير: انت متأخر عن ميعاد الشيفت بتاعك، برجاء الالتزام بالمواعيد."
+    return "https://wa.me/" + digits + "?" + urlencode({"text": message})
+
 with all_breaks_tab:
     if break_riders:
         st.write(f"☕ Riders on break: **{len(break_riders)}**")
         for r in break_riders:
             rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
             name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
-            status = get_status_info(r.get("status"))
-            c1, c2, c3, c4 = st.columns([1.2, 3, 1.2, 1.2])
+            c1, c2, c3 = st.columns([1.2, 3, 1.5])
             with c1:
                 st.write(f"**{rid}**")
             with c2:
                 st.write(name)
             with c3:
-                st.write(status)
-            with c4:
                 st.link_button("🔓 فك بريك", make_break_url(rid), use_container_width=True)
             st.divider()
     else:
@@ -794,11 +797,21 @@ with all_late_tab:
         for r in late_riders:
             rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
             name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
-            c1, c2 = st.columns([1.2, 3])
+            phone = r.get("phone_number") or r.get("phone") or ""
+            c1, c2, c3 = st.columns([1.2, 3, 1.5])
             with c1:
                 st.write(f"**{rid}**")
             with c2:
                 st.write(name)
+            with c3:
+                if phone:
+                    st.link_button(
+                        "⚠️ ابعتله تحذير",
+                        make_late_warning_url(phone, name),
+                        use_container_width=True,
+                    )
+                else:
+                    st.write("مفيش رقم")
             st.divider()
     else:
         st.info("🟢 No riders are currently late.")
@@ -829,4 +842,3 @@ with unassigned_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
-
