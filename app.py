@@ -364,6 +364,36 @@ if is_admin_url:
                     st.info("مش موجود أصلاً")
             except Exception as e:
                 st.error(f"مقدرش أمسحه: {e}")
+        if st.button("🔁 جرب Refresh Token يدوي"):
+            for use_cf in (False, True):
+                headers = {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0",
+                }
+                cookies = (
+                    f"dhh_token={TOKENS['DHH_TOKEN']}; refresh_token={TOKENS['REFRESH_TOKEN']}"
+                )
+                if use_cf:
+                    cookies += (
+                        f"; CF_AppSession={TOKENS['CF_APP_SESSION']}"
+                        f"; CF_Authorization={TOKENS['CF_AUTHORIZATION']}"
+                    )
+                headers["Cookie"] = cookies
+                try:
+                    resp = requests.post(
+                        "https://eg.me.logisticsbackoffice.com/api/iam-login/auth/refresh_token",
+                        json={"refresh_token": TOKENS["REFRESH_TOKEN"]},
+                        headers=headers,
+                        timeout=30,
+                    )
+                    st.write(f"محاولة {'مع' if use_cf else 'من غير'} كوكيز Cloudflare:")
+                    st.code(f"Status: {resp.status_code}")
+                    st.code(f"Content-Type: {resp.headers.get('Content-Type', 'N/A')}")
+                    st.code(resp.text[:1000])
+                except Exception as e:
+                    st.error(f"Exception: {e}")
+                st.divider()
 else:
     # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
@@ -772,4 +802,3 @@ with unassigned_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
-
