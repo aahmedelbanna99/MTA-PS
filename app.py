@@ -404,6 +404,23 @@ if is_admin_url:
                     st.info("مش موجود أصلاً")
             except Exception as e:
                 st.error(f"مقدرش أمسحه: {e}")
+        if st.button("📩 اختبار تليجرام"):
+            if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+                st.error("❌ TELEGRAM_BOT_TOKEN أو TELEGRAM_CHAT_ID فاضيين في الـ Secrets")
+            else:
+                try:
+                    test_resp = requests.post(
+                        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                        json={
+                            "chat_id": TELEGRAM_CHAT_ID,
+                            "text": "✅ ده رسالة اختبار من MTA Portsaid",
+                        },
+                        timeout=10,
+                    )
+                    st.code(f"Status: {test_resp.status_code}")
+                    st.code(test_resp.text[:500])
+                except Exception as e:
+                    st.error(f"Exception: {e}")
 else:
     # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
