@@ -599,7 +599,7 @@ with live_map_tab:
         ("all", f"الكل · {total_riders}"),
         ("working", f"🟢 Working · {working_count}"),
         ("late", f"🔴 Late · {late_count}"),
-        ("break", f"🟡 Break · {break_count}"),
+        ("break", f"🟡 Break / Temp · {break_count + temp_offline_count}"),
         ("starting", f"🔵 Starting · {starting_count}"),
         ("with_order", f"📦 With order · {with_order_count}"),
         ("without_order", f"⚪ Without order · {without_order_count}"),
@@ -707,10 +707,16 @@ with live_map_tab:
                 tooltip=f"{name} ({rider_id})",
             ).add_to(m)
         elif status_info == "Break 🟡" or status_info == "Temp Offline 🟡":
-            icon_html = """
+            status_reason = (r.get("status_metadata") or {}).get("reason", "")
+            is_pause = (
+                status_info == "Temp Offline 🟡"
+                and str(status_reason).strip().lower() == "pause"
+            )
+            pin_color = "#000000" if is_pause else "#FACC15"
+            icon_html = f"""
             <div style="
                 width: 24px; height: 24px;
-                background: #FACC15;
+                background: {pin_color};
                 border-radius: 50% 50% 50% 0;
                 transform: rotate(-45deg);
                 display: flex; align-items: center; justify-content: center;
@@ -771,6 +777,16 @@ def make_break_url(rid):
     })
 
 
+def make_temp_url(rid):
+    return FORM_BASE + "?" + urlencode({
+        "entry.302135773": "شيفتات الطيارين",
+        "entry.1941659317": "فك تمب",
+        "entry.264752225": str(rid),
+        "entry.1551386634": "بورسعيد",
+        "usp": "pp_url",
+    })
+
+
 def make_late_warning_url(phone, name):
     digits = "".join(ch for ch in str(phone) if ch.isdigit())
     message = f"تحذير: انت متأخر عن ميعاد الشيفت بتاعك، برجاء الالتزام بالمواعيد."
@@ -824,11 +840,13 @@ with all_temp_tab:
         for r in temp_riders:
             rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
             name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
-            c1, c2 = st.columns([1.2, 3])
+            c1, c2, c3 = st.columns([1.2, 3, 1.5])
             with c1:
                 st.write(f"**{rid}**")
             with c2:
                 st.write(name)
+            with c3:
+                st.link_button("🔓 فك تمب", make_temp_url(rid), use_container_width=True)
             st.divider()
     else:
         st.info("🟢 No riders are currently temp offline.")
