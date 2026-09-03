@@ -634,27 +634,29 @@ with live_map_tab:
     filter_keys = [f[0] for f in filter_options]
     filter_labels = {f[0]: f[1] for f in filter_options}
 
-    if hasattr(st, "pills"):
-        selected_filter = st.pills(
-            "فلترة الخريطة",
-            options=filter_keys,
-            format_func=lambda k: filter_labels[k],
-            default="all",
-            label_visibility="collapsed",
-            key="map_filter_pills",
-        )
-        if not selected_filter:
-            selected_filter = "all"
-    else:
-        # نسخة بديلة (fallback) لو الإصدار قديم ومفيهوش st.pills
-        if "map_filter_fallback" not in st.session_state:
-            st.session_state.map_filter_fallback = "all"
-        pill_cols = st.columns(len(filter_options))
-        for i, (key, label) in enumerate(filter_options):
-            with pill_cols[i]:
-                if st.button(label, key=f"pill_{key}"):
+    if "map_filter_fallback" not in st.session_state:
+        st.session_state.map_filter_fallback = "all"
+
+    current_label = filter_labels.get(st.session_state.map_filter_fallback, "الكل")
+    with st.popover(f"🔍 Filter: {current_label}", use_container_width=True):
+        if hasattr(st, "pills"):
+            picked = st.pills(
+                "فلترة الخريطة",
+                options=filter_keys,
+                format_func=lambda k: filter_labels[k],
+                default=st.session_state.map_filter_fallback,
+                label_visibility="collapsed",
+                key="map_filter_pills",
+            )
+            if picked:
+                st.session_state.map_filter_fallback = picked
+        else:
+            for key, label in filter_options:
+                if st.button(label, key=f"pill_{key}", use_container_width=True):
                     st.session_state.map_filter_fallback = key
-        selected_filter = st.session_state.map_filter_fallback
+                    st.rerun()
+
+    selected_filter = st.session_state.map_filter_fallback
 
     filtered_riders = [r for r in riders if rider_matches_filter(r, selected_filter)]
 
