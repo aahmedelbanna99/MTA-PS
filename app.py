@@ -296,7 +296,7 @@ def get_tomorrow_shifts(rider_ids):
 # ==================== حالة الطيار ====================
 def get_status_info(raw_status):
     # تطبيع حالة الطيار وتحويلها إلى عرض ملوّن
-    s = (raw_status or "").strip().lower().replace(" ", "_")
+    s = (raw_status or "").strip().lower().replace(" ", "_").replace(".", "")
     if s == "working":
         return "Working 🟢"
     if s == "break":
@@ -369,6 +369,18 @@ if is_admin_url:
                 st.json(sample)
             else:
                 st.warning("مفيش بيانات طيارين لعرضها دلوقتي")
+        search_rid = st.text_input("دور على مندوب بالـ ID", key="search_rid_raw")
+        if st.button("🔍 دور", key="search_rid_btn"):
+            found = None
+            for r in riders:
+                rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
+                if str(rid) == search_rid.strip():
+                    found = r
+                    break
+            if found:
+                st.json(found)
+            else:
+                st.warning("مش لاقي مندوب بالـ ID ده في البيانات الحالية")
     with top_cols[4]:
         if st.button("🔑 Tokens"):
             def mask(v):
@@ -800,4 +812,3 @@ with unassigned_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
-
