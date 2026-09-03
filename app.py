@@ -520,7 +520,8 @@ with_order_count = 0
 without_order_count = 0
 break_riders = []
 late_riders = []
-temp_riders = []
+temp_pause_riders = []  # الدبابيس السودة (Temp بسبب Pause)
+temp_other_riders = []  # التمب بأي سبب تاني، هتتحط تحت تاب البريك
 
 for r in riders:
     total_riders += 1
@@ -533,7 +534,11 @@ for r in riders:
         break_riders.append(r)
     elif status_info == "Temp Offline 🟡":
         temp_offline_count += 1
-        temp_riders.append(r)
+        reason = (r.get("status_metadata") or {}).get("reason", "")
+        if str(reason).strip().lower() == "pause":
+            temp_pause_riders.append(r)
+        else:
+            temp_other_riders.append(r)
     elif status_info == "Starting 🔵":
         starting_count += 1
     elif status_info == "Late 🔴":
@@ -547,8 +552,8 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab, all_late_tab, all_temp_tab, unassigned_tab = st.tabs(
-    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "🟡 All Temp", "📋 Unassigned"]
+live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned"]
 )
 
 
@@ -559,12 +564,16 @@ def rider_matches_filter(r, filt):
     status_info = get_status_info(r.get("status"))
     deliveries_info = r.get("deliveries_info") or {}
     has_active = deliveries_info.get("has_active_deliveries", False)
+    reason = str((r.get("status_metadata") or {}).get("reason", "")).strip().lower()
+    is_pause = status_info == "Temp Offline 🟡" and reason == "pause"
     if filt == "working":
         return status_info == "Working 🟢"
     if filt == "late":
         return status_info == "Late 🔴"
     if filt == "break":
-        return status_info in ("Break 🟡", "Temp Offline 🟡")
+        return status_info == "Break 🟡" or (status_info == "Temp Offline 🟡" and not is_pause)
+    if filt == "temp":
+        return is_pause
     if filt == "starting":
         return status_info == "Starting 🔵"
     if filt == "with_order":
@@ -599,7 +608,8 @@ with live_map_tab:
         ("all", f"الكل · {total_riders}"),
         ("working", f"🟢 Working · {working_count}"),
         ("late", f"🔴 Late · {late_count}"),
-        ("break", f"🟡 Break / Temp · {break_count + temp_offline_count}"),
+        ("break", f"🟡 Break / Temp · {break_count + len(temp_other_riders)}"),
+        ("temp", f"🚢 Temp · {len(temp_pause_riders)}"),
         ("starting", f"🔵 Starting · {starting_count}"),
         ("with_order", f"📦 With order · {with_order_count}"),
         ("without_order", f"⚪ Without order · {without_order_count}"),
@@ -793,8 +803,9 @@ def make_late_warning_url(phone, name):
     return "https://wa.me/" + digits + "?" + urlencode({"text": message})
 
 with all_breaks_tab:
-    if break_riders:
-        st.write(f"☕ Riders on break: **{len(break_riders)}**")
+    combined_break_temp = break_riders + temp_other_riders
+    if combined_break_temp:
+        st.write(f"☕ Riders on break/temp: **{len(combined_break_temp)}**")
         for r in break_riders:
             rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
             name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
@@ -805,6 +816,17 @@ with all_breaks_tab:
                 st.write(name)
             with c3:
                 st.link_button("🔓 فك بريك", make_break_url(rid), use_container_width=True)
+            st.divider()
+        for r in temp_other_riders:
+            rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
+            name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
+            c1, c2, c3 = st.columns([1.2, 3, 1.5])
+            with c1:
+                st.write(f"**{rid}**")
+            with c2:
+                st.write(name)
+            with c3:
+                st.link_button("🔓 فك تمب", make_temp_url(rid), use_container_width=True)
             st.divider()
     else:
         st.info("🟢 No riders are currently on break.")
@@ -833,23 +855,6 @@ with all_late_tab:
             st.divider()
     else:
         st.info("🟢 No riders are currently late.")
-
-with all_temp_tab:
-    if temp_riders:
-        st.write(f"🟡 Riders temp offline: **{len(temp_riders)}**")
-        for r in temp_riders:
-            rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
-            name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
-            c1, c2, c3 = st.columns([1.2, 3, 1.5])
-            with c1:
-                st.write(f"**{rid}**")
-            with c2:
-                st.write(name)
-            with c3:
-                st.link_button("🔓 فك تمب", make_temp_url(rid), use_container_width=True)
-            st.divider()
-    else:
-        st.info("🟢 No riders are currently temp offline.")
 
 with unassigned_tab:
     if not rider_ids:
