@@ -301,7 +301,7 @@ def get_status_info(raw_status):
         return "Working 🟢"
     if s == "break":
         return "Break 🟡"
-    if s in ("temp_offline", "offline", "not_working"):
+    if s in ("temp_offline", "offline", "not_working", "temp_not_working"):
         return "Temp Offline 🟡"
     if s == "ending":
         return "Ending ⚪"
@@ -859,3 +859,4 @@ with unassigned_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
+
