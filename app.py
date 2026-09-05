@@ -1002,11 +1002,25 @@ with performance_tab:
         s = seconds % 60
         return f"{h:02d}:{m:02d}:{s:02d}"
 
+    MIN_SHIFT_AGE_SECONDS = 61 * 60  # ساعة ودقيقة - قبل كده مايتحسبش عليه UTR واطي
+
     low_utr_riders = []
+    now_utc = datetime.now(ZoneInfo("UTC"))
     for r in riders:
         status_info = get_status_info(r.get("status"))
         if status_info in ("Late 🔴", "Starting 🔵"):
             continue
+
+        # استثناء المندوب اللي لسه بادئ شيفته من أقل من ساعة ودقيقة
+        shift_started_at = r.get("active_shift_started_at")
+        if shift_started_at:
+            try:
+                started_dt = datetime.fromisoformat(shift_started_at.replace("Z", "+00:00"))
+                shift_age_seconds = (now_utc - started_dt).total_seconds()
+                if shift_age_seconds < MIN_SHIFT_AGE_SECONDS:
+                    continue
+            except (ValueError, TypeError):
+                pass
 
         perf = r.get("performance") or {}
         utr = perf.get("utilization_rate")
