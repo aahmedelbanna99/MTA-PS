@@ -1056,7 +1056,7 @@ with performance_tab:
         )
 
     # ترتيب من الأقل UTR للأعلى (الأسوأ أداءً في الأول)
-    low_utr_riders.sort(key=lambda x: x["utr"], reverse=True)
+    low_utr_riders.sort(key=lambda x: x["utr"])
 
     if not low_utr_riders:
         st.success("✅ مفيش مناديب UTR بتاعهم أقل من 1.0 دلوقتي")
