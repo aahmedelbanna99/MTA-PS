@@ -623,8 +623,8 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab = st.tabs(
-    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned"]
+live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab, performance_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned", "📊 Performance"]
 )
 
 
@@ -982,6 +982,86 @@ with unassigned_tab:
                 <tr>
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; width:100px;">ID</th>
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+        """
+        st.markdown(table_html, unsafe_allow_html=True)
+
+with performance_tab:
+    def format_worked_time(seconds):
+        try:
+            seconds = int(seconds)
+        except (TypeError, ValueError):
+            return "00:00:00"
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    low_utr_riders = []
+    for r in riders:
+        status_info = get_status_info(r.get("status"))
+        if status_info == "Late 🔴":
+            continue
+
+        perf = r.get("performance") or {}
+        utr = perf.get("utilization_rate")
+        if utr is None:
+            continue
+        try:
+            utr = float(utr)
+        except (TypeError, ValueError):
+            continue
+
+        if utr >= 1.0:
+            continue
+
+        rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
+        name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
+        worked_seconds = (perf.get("time_spent") or {}).get("worked_seconds", 0)
+        deliveries_info = r.get("deliveries_info") or {}
+        deliveries_count = deliveries_info.get("completed_deliveries_count", 0)
+
+        low_utr_riders.append(
+            {
+                "id": rid,
+                "name": name,
+                "utr": utr,
+                "worked": format_worked_time(worked_seconds),
+                "deliveries": deliveries_count,
+            }
+        )
+
+    # ترتيب من الأقل UTR للأعلى (الأسوأ أداءً في الأول)
+    low_utr_riders.sort(key=lambda x: x["utr"])
+
+    if not low_utr_riders:
+        st.success("✅ مفيش مناديب UTR بتاعهم أقل من 1.0 دلوقتي")
+    else:
+        st.write(f"عدد المناديب اللي الـ UTR بتاعهم أقل من 1.0: **{len(low_utr_riders)}**")
+        rows_html = "".join(
+            f"<tr>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['id']}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{row['name']}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['utr']:.1f}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['worked']}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['deliveries']}</td>"
+            f"</tr>"
+            for row in low_utr_riders
+        )
+        table_html = f"""
+        <table style="border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; width:auto;">
+            <thead>
+                <tr>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; width:100px;">ID</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999;">UTR</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Time Worked</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999;">Deliveries</th>
                 </tr>
             </thead>
             <tbody>
