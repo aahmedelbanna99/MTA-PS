@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # MTA Portsaid - Live Riders
 # تطبيق Streamlit لعرض حالة الطيارين المباشرة (مدينة 204 - بورسعيد)
-# مع تجديد تلقائي للتوكن عبر tokens.json
+# مع تجديد تلقائي (استباقي + عند 401) للتوكن عبر tokens.json
 
 import json
 import os
 import time
+import threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
@@ -72,6 +73,14 @@ if not st.session_state.authenticated:
 TOKENS_FILE = "tokens.json"
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
 
+# إعدادات التجديد الاستباقي
+REFRESH_INTERVAL_SECONDS = 90 * 60  # 90 دقيقة - نجدد قبل ما التوكن يموت
+MIN_SECONDS_BETWEEN_REFRESH = 60    # حماية من تكرار التحديث خلال أقل من دقيقة (لو أكتر من ثريد نادى في نفس اللحظة)
+
+# قفل عام يمنع أكتر من ثريد (زي طلبات get_tomorrow_shifts المتوازية) من عمل
+# refresh لنفس التوكن في نفس اللحظة
+token_lock = threading.Lock()
+
 # القيم الافتراضية من st.secrets إن وجدت
 TOKENS = {
     "BEARER_TOKEN": st.secrets.get("BEARER_TOKEN", ""),
@@ -80,6 +89,8 @@ TOKENS = {
     # كوكيز Cloudflare (تبدأ من secrets، لكن ممكن تتحدث من لوحة الأدمن وتتحفظ في tokens.json)
     "CF_APP_SESSION": st.secrets.get("CF_APP_SESSION", ""),
     "CF_AUTHORIZATION": st.secrets.get("CF_AUTHORIZATION", ""),
+    # وقت آخر تجديد ناجح لـ BEARER/DHH (يونكس تايمستامب)
+    "last_refresh": 0,
 }
 
 # tokens.json له الأولوية على st.secrets (بما فيها كوكيز Cloudflare بعد التعديل)
@@ -93,6 +104,7 @@ if os.path.exists(TOKENS_FILE):
             "REFRESH_TOKEN",
             "CF_APP_SESSION",
             "CF_AUTHORIZATION",
+            "last_refresh",
         ):
             if saved.get(k):
                 TOKENS[k] = saved[k]
@@ -124,61 +136,89 @@ def build_headers():
     }
 
 
-def refresh_access_token():
-    # تجديد التوكن — بنجرب الأول من غير كوكيز Cloudflare
-    # لو نجح من غيرهم، يبقى التطبيق بيتعالج لوحده حتى لو الكوكيز ماتت
-    for use_cf in (False, True):
-        try:
-            headers = {
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0",
-            }
-            cookies = (
-                f"dhh_token={TOKENS['DHH_TOKEN']}; refresh_token={TOKENS['REFRESH_TOKEN']}"
-            )
-            if use_cf:
-                cookies += (
-                    f"; CF_AppSession={TOKENS['CF_APP_SESSION']}"
-                    f"; CF_Authorization={TOKENS['CF_AUTHORIZATION']}"
-                )
-            headers["Cookie"] = cookies
+def refresh_access_token(force=False):
+    """
+    تجديد BEARER_TOKEN / DHH_TOKEN / REFRESH_TOKEN عن طريق الـ refresh endpoint.
+    - محمي بـ lock عشان لو أكتر من ثريد (من ThreadPoolExecutor في get_tomorrow_shifts)
+      حاولوا يعملوا تجديد في نفس اللحظة، يحصل مرة واحدة بس.
+    - force=True معناها تجاهل حماية "دقيقة واحدة بين كل تجديد وتاني"
+      (بنستخدمها لما 401 يحصل فعليًا ولازم نرد بسرعة).
+    """
+    with token_lock:
+        # حماية: لو ثريد تاني حدّث التوكن من أقل من دقيقة، متعملش تحديث زيادة
+        if not force and (time.time() - TOKENS.get("last_refresh", 0) < MIN_SECONDS_BETWEEN_REFRESH):
+            return True
 
-            resp = requests.post(
-                "https://eg.me.logisticsbackoffice.com/api/iam-login/auth/refresh_token",
-                json={"refresh_token": TOKENS["REFRESH_TOKEN"]},
-                headers=headers,
-                timeout=30,
-            )
-            if resp.status_code in (200, 201) and "application/json" in resp.headers.get("Content-Type", ""):
-                data = resp.json()
-                new_dhh = data.get("dhhToken")
-                if not new_dhh:
-                    continue
-                if data.get("token"):
-                    TOKENS["BEARER_TOKEN"] = data["token"]
-                TOKENS["DHH_TOKEN"] = new_dhh
-                if data.get("refreshToken"):
-                    TOKENS["REFRESH_TOKEN"] = data["refreshToken"]
-                save_tokens()
-                st.toast("✅ تم تحديث التوكنات تلقائيًا")
-                return True
-        except Exception:
-            continue
-    return False
+        # بنجرب الأول من غير كوكيز Cloudflare، ولو مانفعش نجرب معاهم
+        # لو نجح من غيرهم، يبقى BEARER/DHH بيتجددوا حتى لو كوكيز Cloudflare ماتت
+        for use_cf in (False, True):
+            try:
+                headers = {
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Mozilla/5.0",
+                }
+                cookies = (
+                    f"dhh_token={TOKENS['DHH_TOKEN']}; refresh_token={TOKENS['REFRESH_TOKEN']}"
+                )
+                if use_cf:
+                    cookies += (
+                        f"; CF_AppSession={TOKENS['CF_APP_SESSION']}"
+                        f"; CF_Authorization={TOKENS['CF_AUTHORIZATION']}"
+                    )
+                headers["Cookie"] = cookies
+
+                resp = requests.post(
+                    "https://eg.me.logisticsbackoffice.com/api/iam-login/auth/refresh_token",
+                    json={"refresh_token": TOKENS["REFRESH_TOKEN"]},
+                    headers=headers,
+                    timeout=30,
+                )
+                if resp.status_code in (200, 201) and "application/json" in resp.headers.get("Content-Type", ""):
+                    data = resp.json()
+                    new_dhh = data.get("dhhToken")
+                    if not new_dhh:
+                        continue
+                    if data.get("token"):
+                        TOKENS["BEARER_TOKEN"] = data["token"]
+                    TOKENS["DHH_TOKEN"] = new_dhh
+                    if data.get("refreshToken"):
+                        TOKENS["REFRESH_TOKEN"] = data["refreshToken"]
+                    TOKENS["last_refresh"] = time.time()
+                    save_tokens()
+                    st.toast("✅ تم تحديث التوكنات تلقائيًا")
+                    return True
+            except Exception:
+                continue
+        return False
+
+
+def ensure_token_fresh():
+    """
+    تجديد استباقي: بتتنفذ في بداية كل تشغيل للصفحة (كل rerun بتاع Streamlit،
+    اللي بيحصل كل دقيقة بسبب st_autorefresh). لو عدى أكتر من
+    REFRESH_INTERVAL_SECONDS من آخر تجديد ناجح، نعمل تجديد قبل ما التوكن يموت
+    أصلاً - بدل ما نستنى الـ 401 يحصل.
+    """
+    elapsed = time.time() - TOKENS.get("last_refresh", 0)
+    if elapsed > REFRESH_INTERVAL_SECONDS:
+        refresh_access_token(force=True)
 
 
 def fetch_with_auth(url, params):
-    # طلب مع إعادة المحاولة عند 401 (تجديد التوكن ثم إعادة المحاولة)
+    # طلب مع إعادة المحاولة عند 401 (تجديد التوكن فورًا ثم إعادة المحاولة)
     resp = None
     for attempt in range(2):
         resp = requests.get(url, headers=build_headers(), params=params, timeout=30)
         if resp.status_code == 401 and attempt == 0:
-            if refresh_access_token():
+            if refresh_access_token(force=True):
                 continue
         return resp
     return resp
 
+
+# تجديد استباقي قبل أي طلبات - أول حاجة بتتنفذ في كل rerun
+ensure_token_fresh()
 
 # ==================== تنبيه تليجرام عند انتهاء الجلسة ====================
 TELEGRAM_BOT_TOKEN = st.secrets.get("TELEGRAM_BOT_TOKEN", "")
@@ -263,7 +303,8 @@ def get_riders():
 @st.cache_data(ttl=300)
 def get_tomorrow_shifts(rider_ids):
     # جلب شيفتات الغد لكل مندوب بالتوازي (10 في نفس الوقت بدل واحد ورا التاني)
-    # بنستخدم fetch_with_auth اللي بيعالج الـ 401 بنفسه — من غير refresh يدوي مكرر
+    # بنستخدم fetch_with_auth اللي بيعالج الـ 401 بنفسه (ومحمي بالـ lock) — من غير
+    # تعارض لو أكتر من ثريد حصلهم 401 في نفس اللحظة
     cairo_tz = ZoneInfo("Africa/Cairo")
     tomorrow = datetime.now(cairo_tz) + timedelta(days=1)
     params = {
@@ -387,14 +428,25 @@ if is_admin_url:
                 if not v:
                     return "(فاضي)"
                 return f"{v[:15]}...{v[-15:]} (طول: {len(v)})"
+            last_refresh_ts = TOKENS.get("last_refresh", 0)
+            last_refresh_str = (
+                datetime.fromtimestamp(last_refresh_ts, ZoneInfo("Africa/Cairo")).strftime("%Y-%m-%d %H:%M:%S")
+                if last_refresh_ts else "لسه ماحصلش تجديد"
+            )
             st.code(
                 f"BEARER_TOKEN: {mask(TOKENS.get('BEARER_TOKEN'))}\n"
                 f"DHH_TOKEN: {mask(TOKENS.get('DHH_TOKEN'))}\n"
                 f"CF_AUTHORIZATION: {mask(TOKENS.get('CF_AUTHORIZATION'))}\n"
                 f"CF_APP_SESSION: {mask(TOKENS.get('CF_APP_SESSION'))}\n"
                 f"REFRESH_TOKEN: {mask(TOKENS.get('REFRESH_TOKEN'))}\n"
+                f"آخر تجديد استباقي: {last_refresh_str}\n"
                 f"tokens.json موجود: {os.path.exists(TOKENS_FILE)}"
             )
+        if st.button("🔁 جدد التوكن دلوقتي"):
+            if refresh_access_token(force=True):
+                st.success("✅ اتجدد بنجاح")
+            else:
+                st.error("❌ فشل التجديد - REFRESH_TOKEN غالبًا منتهي، محتاج تسجيل دخول جديد")
         if st.button("🗑️ امسح tokens.json"):
             try:
                 if os.path.exists(TOKENS_FILE):
@@ -476,6 +528,8 @@ if is_admin_url and st.session_state.get("show_admin", False):
                         TOKENS["CF_AUTHORIZATION"] = new_cf_auth.strip()
                         updated = True
                     if updated:
+                        # تحديث يدوي من الأدمن = نعتبره تجديد ناجح، فبنسجل وقته
+                        TOKENS["last_refresh"] = time.time()
                         save_tokens()
                         st.cache_data.clear()
                         st.success("✅ تم تحديث القيم بنجاح")
