@@ -693,7 +693,7 @@ with live_map_tab:
 
     current_label = filter_labels.get(st.session_state.map_filter_fallback, "الكل")
 
-    filter_col, search_col = st.columns([1, 2])
+    filter_col, search_col, spacer_col = st.columns([1, 1.4, 3.6])
     with filter_col:
         with st.popover(f"🔍 {current_label}"):
             if hasattr(st, "pills"):
@@ -717,7 +717,7 @@ with live_map_tab:
             "دور بالـ ID",
             key="map_search_rid",
             label_visibility="collapsed",
-            placeholder="🔎 ID ",
+            placeholder="ID",
         )
 
     selected_filter = st.session_state.map_filter_fallback
