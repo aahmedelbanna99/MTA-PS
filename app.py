@@ -143,11 +143,15 @@ def refresh_access_token(force=False):
       حاولوا يعملوا تجديد في نفس اللحظة، يحصل مرة واحدة بس.
     - force=True معناها تجاهل حماية "دقيقة واحدة بين كل تجديد وتاني"
       (بنستخدمها لما 401 يحصل فعليًا ولازم نرد بسرعة).
+    - بتسجل تفاصيل آخر فشل في TOKENS["last_refresh_error"] عشان نعرف السبب
+      الحقيقي بدل ما نكتم الخطأ.
     """
     with token_lock:
         # حماية: لو ثريد تاني حدّث التوكن من أقل من دقيقة، متعملش تحديث زيادة
         if not force and (time.time() - TOKENS.get("last_refresh", 0) < MIN_SECONDS_BETWEEN_REFRESH):
             return True
+
+        last_errors = []
 
         # بنجرب الأول من غير كوكيز Cloudflare، ولو مانفعش نجرب معاهم
         # لو نجح من غيرهم، يبقى BEARER/DHH بيتجددوا حتى لو كوكيز Cloudflare ماتت
@@ -178,6 +182,9 @@ def refresh_access_token(force=False):
                     data = resp.json()
                     new_dhh = data.get("dhhToken")
                     if not new_dhh:
+                        last_errors.append(
+                            f"use_cf={use_cf}: رد 200 بس من غير dhhToken - الرد: {resp.text[:300]}"
+                        )
                         continue
                     if data.get("token"):
                         TOKENS["BEARER_TOKEN"] = data["token"]
@@ -185,11 +192,20 @@ def refresh_access_token(force=False):
                     if data.get("refreshToken"):
                         TOKENS["REFRESH_TOKEN"] = data["refreshToken"]
                     TOKENS["last_refresh"] = time.time()
+                    TOKENS["last_refresh_error"] = ""
                     save_tokens()
                     st.toast("✅ تم تحديث التوكنات تلقائيًا")
                     return True
-            except Exception:
-                continue
+                else:
+                    last_errors.append(
+                        f"use_cf={use_cf}: Status {resp.status_code}, "
+                        f"Content-Type: {resp.headers.get('Content-Type', 'N/A')}, "
+                        f"Body: {resp.text[:300]}"
+                    )
+            except Exception as e:
+                last_errors.append(f"use_cf={use_cf}: Exception - {e}")
+
+        TOKENS["last_refresh_error"] = " | ".join(last_errors)
         return False
 
 
@@ -442,11 +458,14 @@ if is_admin_url:
                 f"آخر تجديد استباقي: {last_refresh_str}\n"
                 f"tokens.json موجود: {os.path.exists(TOKENS_FILE)}"
             )
+            if TOKENS.get("last_refresh_error"):
+                st.error(f"آخر خطأ تجديد:\n{TOKENS['last_refresh_error']}")
         if st.button("🔁 جدد التوكن دلوقتي"):
             if refresh_access_token(force=True):
                 st.success("✅ اتجدد بنجاح")
             else:
                 st.error("❌ فشل التجديد - REFRESH_TOKEN غالبًا منتهي، محتاج تسجيل دخول جديد")
+                st.code(TOKENS.get("last_refresh_error", "مفيش تفاصيل خطأ متسجلة"))
         if st.button("🗑️ امسح tokens.json"):
             try:
                 if os.path.exists(TOKENS_FILE):
