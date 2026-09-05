@@ -1005,7 +1005,7 @@ with performance_tab:
     low_utr_riders = []
     for r in riders:
         status_info = get_status_info(r.get("status"))
-        if status_info == "Late 🔴":
+        if status_info in ("Late 🔴", "Starting 🔵"):
             continue
 
         perf = r.get("performance") or {}
