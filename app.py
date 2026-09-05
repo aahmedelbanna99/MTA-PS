@@ -1022,7 +1022,10 @@ with performance_tab:
 
         rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
         name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
-        worked_seconds = (perf.get("time_spent") or {}).get("worked_seconds", 0)
+        time_spent = perf.get("time_spent") or {}
+        worked_seconds = time_spent.get("worked_seconds", 0)
+        break_seconds = time_spent.get("break_seconds", 0)
+        late_seconds = time_spent.get("late_seconds", 0)
         deliveries_info = r.get("deliveries_info") or {}
         deliveries_count = deliveries_info.get("completed_deliveries_count", 0)
 
@@ -1032,23 +1035,26 @@ with performance_tab:
                 "name": name,
                 "utr": utr,
                 "worked": format_worked_time(worked_seconds),
+                "break": format_worked_time(break_seconds),
+                "late": format_worked_time(late_seconds),
                 "deliveries": deliveries_count,
             }
         )
 
     # ترتيب من الأقل UTR للأعلى (الأسوأ أداءً في الأول)
-    low_utr_riders.sort(key=lambda x: x["utr"])
+    low_utr_riders.sort(key=lambda x: x["utr"], reverse=True)
 
     if not low_utr_riders:
         st.success("✅ مفيش مناديب UTR بتاعهم أقل من 1.0 دلوقتي")
     else:
-        st.write(f"عدد المناديب اللي الـ UTR بتاعهم أقل من 1.0: **{len(low_utr_riders)}**")
         rows_html = "".join(
             f"<tr>"
             f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['id']}</td>"
             f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{row['name']}</td>"
             f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['utr']:.1f}</td>"
             f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['worked']}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['break']}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['late']}</td>"
             f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['deliveries']}</td>"
             f"</tr>"
             for row in low_utr_riders
@@ -1061,6 +1067,8 @@ with performance_tab:
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999;">UTR</th>
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Time Worked</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Total Break</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Total Late</th>
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999;">Deliveries</th>
                 </tr>
             </thead>
