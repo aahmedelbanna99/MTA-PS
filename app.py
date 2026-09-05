@@ -692,23 +692,33 @@ with live_map_tab:
         st.session_state.map_filter_fallback = "all"
 
     current_label = filter_labels.get(st.session_state.map_filter_fallback, "الكل")
-    with st.popover(f"🔍 Filter: {current_label}", use_container_width=True):
-        if hasattr(st, "pills"):
-            picked = st.pills(
-                "فلترة الخريطة",
-                options=filter_keys,
-                format_func=lambda k: filter_labels[k],
-                default=st.session_state.map_filter_fallback,
-                label_visibility="collapsed",
-                key="map_filter_pills",
-            )
-            if picked:
-                st.session_state.map_filter_fallback = picked
-        else:
-            for key, label in filter_options:
-                if st.button(label, key=f"pill_{key}", use_container_width=True):
-                    st.session_state.map_filter_fallback = key
-                    st.rerun()
+
+    filter_col, search_col = st.columns([1, 2])
+    with filter_col:
+        with st.popover(f"🔍 {current_label}"):
+            if hasattr(st, "pills"):
+                picked = st.pills(
+                    "فلترة الخريطة",
+                    options=filter_keys,
+                    format_func=lambda k: filter_labels[k],
+                    default=st.session_state.map_filter_fallback,
+                    label_visibility="collapsed",
+                    key="map_filter_pills",
+                )
+                if picked:
+                    st.session_state.map_filter_fallback = picked
+            else:
+                for key, label in filter_options:
+                    if st.button(label, key=f"pill_{key}", use_container_width=True):
+                        st.session_state.map_filter_fallback = key
+                        st.rerun()
+    with search_col:
+        map_search_id = st.text_input(
+            "دور بالـ ID",
+            key="map_search_rid",
+            label_visibility="collapsed",
+            placeholder="🔎 دور على مندوب بالـ ID على الخريطة",
+        )
 
     selected_filter = st.session_state.map_filter_fallback
 
@@ -837,11 +847,36 @@ with live_map_tab:
 
         points.append([lat, lng])
 
+        # هايلايت المندوب اللي بندور عليه بالـ ID
+        if map_search_id.strip() and str(rider_id) == map_search_id.strip():
+            folium.CircleMarker(
+                location=[lat, lng],
+                radius=20,
+                color="#FF0000",
+                weight=3,
+                fill=False,
+            ).add_to(m)
+
     if len(points) == 1:
         m.location = points[0]
         m.zoom_start = 17
     elif points:
         m.fit_bounds(points)
+
+    # لو فيه بحث بالـ ID ولاقيناه، نزوم عليه بالأولوية
+    if map_search_id.strip():
+        search_point = next(
+            (
+                p for p, r in zip(points, filtered_riders)
+                if str(r.get("employee_id") or r.get("employeeId") or r.get("id")) == map_search_id.strip()
+            ),
+            None,
+        )
+        if search_point:
+            m.location = search_point
+            m.zoom_start = 17
+        else:
+            st.warning("مش لاقي مندوب بالـ ID ده على الخريطة دلوقتي")
 
     st_folium(m, use_container_width=True, height=700, key="riders_map", returned_objects=[])
 
