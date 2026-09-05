@@ -717,7 +717,7 @@ with live_map_tab:
             "دور بالـ ID",
             key="map_search_rid",
             label_visibility="collapsed",
-            placeholder="🔎 دور على مندوب بالـ ID على الخريطة",
+            placeholder="🔎 ID ",
         )
 
     selected_filter = st.session_state.map_filter_fallback
