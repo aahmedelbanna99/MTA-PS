@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
 # MTA Portsaid - Live Riders
 # تطبيق Streamlit لعرض حالة الطيارين المباشرة (مدينة 204 - بورسعيد)
-# مع تجديد تلقائي (استباقي + عند 401) للتوكن عبر tokens.json
+# مع تجديد تلقائي للتوكن عبر tokens.json
 
 import json
 import os
 import time
-import threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
@@ -55,31 +54,9 @@ SUPERVISOR_PASSWORDS = [
     if p.strip()
 ]
 
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    st.markdown("### 🔒 Sign in")
-    login_pwd = st.text_input("Password", type="password", key="login_pwd_input")
-    if st.button("Go", key="login_submit_btn"):
-        if SUPERVISOR_PASSWORDS and login_pwd in SUPERVISOR_PASSWORDS:
-            st.session_state.authenticated = True
-            st.rerun()
-        else:
-            st.error("❌ Wrong password")
-    st.stop()
-
 # ==================== التوكنات (tokens.json له الأولوية) ====================
 TOKENS_FILE = "tokens.json"
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
-
-# إعدادات التجديد الاستباقي
-REFRESH_INTERVAL_SECONDS = 90 * 60  # 90 دقيقة - نجدد قبل ما التوكن يموت
-MIN_SECONDS_BETWEEN_REFRESH = 60    # حماية من تكرار التحديث خلال أقل من دقيقة (لو أكتر من ثريد نادى في نفس اللحظة)
-
-# قفل عام يمنع أكتر من ثريد (زي طلبات get_tomorrow_shifts المتوازية) من عمل
-# refresh لنفس التوكن في نفس اللحظة
-token_lock = threading.Lock()
 
 # القيم الافتراضية من st.secrets إن وجدت
 TOKENS = {
@@ -89,8 +66,6 @@ TOKENS = {
     # كوكيز Cloudflare (تبدأ من secrets، لكن ممكن تتحدث من لوحة الأدمن وتتحفظ في tokens.json)
     "CF_APP_SESSION": st.secrets.get("CF_APP_SESSION", ""),
     "CF_AUTHORIZATION": st.secrets.get("CF_AUTHORIZATION", ""),
-    # وقت آخر تجديد ناجح لـ BEARER/DHH (يونكس تايمستامب)
-    "last_refresh": 0,
 }
 
 # tokens.json له الأولوية على st.secrets (بما فيها كوكيز Cloudflare بعد التعديل)
@@ -104,7 +79,6 @@ if os.path.exists(TOKENS_FILE):
             "REFRESH_TOKEN",
             "CF_APP_SESSION",
             "CF_AUTHORIZATION",
-            "last_refresh",
         ):
             if saved.get(k):
                 TOKENS[k] = saved[k]
@@ -121,6 +95,45 @@ def save_tokens():
         pass
 
 
+# ==================== تحديث تلقائي عن طريق سكريبت خارجي (رابط سري) ====================
+# سكريبت Tampermonkey ممكن يبعت القيم الجديدة عن طريق رابط زي:
+# ?auto_secret=XXX&auto_token=YYY&auto_cfauth=ZZZ
+# ده بيشتغل من غير الحاجة لتسجيل دخول خالص، عشان يقدر يحصل أوتوماتيك
+AUTO_UPDATE_SECRET = st.secrets.get("AUTO_UPDATE_SECRET", "")
+_qp = st.query_params
+if AUTO_UPDATE_SECRET and _qp.get("auto_secret") == AUTO_UPDATE_SECRET:
+    _auto_token = _qp.get("auto_token", "")
+    _auto_cfauth = _qp.get("auto_cfauth", "")
+    _updated_auto = False
+    if _auto_token:
+        TOKENS["BEARER_TOKEN"] = _auto_token
+        TOKENS["DHH_TOKEN"] = _auto_token
+        _updated_auto = True
+    if _auto_cfauth:
+        TOKENS["CF_AUTHORIZATION"] = _auto_cfauth
+        _updated_auto = True
+    if _updated_auto:
+        save_tokens()
+        st.cache_data.clear()
+        st.success("✅ Auto update applied")
+    else:
+        st.info("مفيش قيم جديدة اتبعتت")
+    st.stop()
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.markdown("### 🔒 Sign in")
+    login_pwd = st.text_input("Password", type="password", key="login_pwd_input")
+    if st.button("Go", key="login_submit_btn"):
+        if SUPERVISOR_PASSWORDS and login_pwd in SUPERVISOR_PASSWORDS:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("❌ Wrong password")
+    st.stop()
+
 def build_headers():
     # بناء الهيدرز من قاموس التوكنات الحالي (مع كوكيز Cloudflare زي النسخة الأصلية)
     return {
@@ -136,105 +149,61 @@ def build_headers():
     }
 
 
-def refresh_access_token(force=False):
-    """
-    تجديد BEARER_TOKEN / DHH_TOKEN / REFRESH_TOKEN عن طريق الـ refresh endpoint.
-    - محمي بـ lock عشان لو أكتر من ثريد (من ThreadPoolExecutor في get_tomorrow_shifts)
-      حاولوا يعملوا تجديد في نفس اللحظة، يحصل مرة واحدة بس.
-    - force=True معناها تجاهل حماية "دقيقة واحدة بين كل تجديد وتاني"
-      (بنستخدمها لما 401 يحصل فعليًا ولازم نرد بسرعة).
-    - بتسجل تفاصيل آخر فشل في TOKENS["last_refresh_error"] عشان نعرف السبب
-      الحقيقي بدل ما نكتم الخطأ.
-    """
-    with token_lock:
-        # حماية: لو ثريد تاني حدّث التوكن من أقل من دقيقة، متعملش تحديث زيادة
-        if not force and (time.time() - TOKENS.get("last_refresh", 0) < MIN_SECONDS_BETWEEN_REFRESH):
-            return True
-
-        last_errors = []
-
-        # بنجرب الأول من غير كوكيز Cloudflare، ولو مانفعش نجرب معاهم
-        # لو نجح من غيرهم، يبقى BEARER/DHH بيتجددوا حتى لو كوكيز Cloudflare ماتت
-        for use_cf in (False, True):
-            try:
-                headers = {
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "User-Agent": "Mozilla/5.0",
-                }
-                cookies = (
-                    f"dhh_token={TOKENS['DHH_TOKEN']}; refresh_token={TOKENS['REFRESH_TOKEN']}"
+def refresh_access_token():
+    # تجديد التوكن — بنجرب الأول من غير كوكيز Cloudflare
+    # لو نجح من غيرهم، يبقى التطبيق بيتعالج لوحده حتى لو الكوكيز ماتت
+    for use_cf in (False, True):
+        try:
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            }
+            cookies = (
+                f"dhh_token={TOKENS['DHH_TOKEN']}; refresh_token={TOKENS['REFRESH_TOKEN']}"
+            )
+            if use_cf:
+                cookies += (
+                    f"; CF_AppSession={TOKENS['CF_APP_SESSION']}"
+                    f"; CF_Authorization={TOKENS['CF_AUTHORIZATION']}"
                 )
-                if use_cf:
-                    cookies += (
-                        f"; CF_AppSession={TOKENS['CF_APP_SESSION']}"
-                        f"; CF_Authorization={TOKENS['CF_AUTHORIZATION']}"
-                    )
-                headers["Cookie"] = cookies
+            headers["Cookie"] = cookies
 
-                resp = requests.post(
-                    "https://eg.me.logisticsbackoffice.com/api/iam-login/auth/refresh_token",
-                    json={"refresh_token": TOKENS["REFRESH_TOKEN"]},
-                    headers=headers,
-                    timeout=30,
-                )
-                if resp.status_code in (200, 201) and "application/json" in resp.headers.get("Content-Type", ""):
-                    data = resp.json()
-                    new_dhh = data.get("dhhToken")
-                    if not new_dhh:
-                        last_errors.append(
-                            f"use_cf={use_cf}: رد 200 بس من غير dhhToken - الرد: {resp.text[:300]}"
-                        )
-                        continue
-                    if data.get("token"):
-                        TOKENS["BEARER_TOKEN"] = data["token"]
-                    TOKENS["DHH_TOKEN"] = new_dhh
-                    if data.get("refreshToken"):
-                        TOKENS["REFRESH_TOKEN"] = data["refreshToken"]
-                    TOKENS["last_refresh"] = time.time()
-                    TOKENS["last_refresh_error"] = ""
-                    save_tokens()
-                    st.toast("✅ تم تحديث التوكنات تلقائيًا")
-                    return True
-                else:
-                    last_errors.append(
-                        f"use_cf={use_cf}: Status {resp.status_code}, "
-                        f"Content-Type: {resp.headers.get('Content-Type', 'N/A')}, "
-                        f"Body: {resp.text[:300]}"
-                    )
-            except Exception as e:
-                last_errors.append(f"use_cf={use_cf}: Exception - {e}")
-
-        TOKENS["last_refresh_error"] = " | ".join(last_errors)
-        return False
-
-
-def ensure_token_fresh():
-    """
-    تجديد استباقي: بتتنفذ في بداية كل تشغيل للصفحة (كل rerun بتاع Streamlit،
-    اللي بيحصل كل دقيقة بسبب st_autorefresh). لو عدى أكتر من
-    REFRESH_INTERVAL_SECONDS من آخر تجديد ناجح، نعمل تجديد قبل ما التوكن يموت
-    أصلاً - بدل ما نستنى الـ 401 يحصل.
-    """
-    elapsed = time.time() - TOKENS.get("last_refresh", 0)
-    if elapsed > REFRESH_INTERVAL_SECONDS:
-        refresh_access_token(force=True)
+            resp = requests.post(
+                "https://eg.me.logisticsbackoffice.com/api/iam-login/auth/refresh_token",
+                json={"refresh_token": TOKENS["REFRESH_TOKEN"]},
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code in (200, 201) and "application/json" in resp.headers.get("Content-Type", ""):
+                data = resp.json()
+                new_dhh = data.get("dhhToken")
+                if not new_dhh:
+                    continue
+                if data.get("token"):
+                    TOKENS["BEARER_TOKEN"] = data["token"]
+                TOKENS["DHH_TOKEN"] = new_dhh
+                if data.get("refreshToken"):
+                    TOKENS["REFRESH_TOKEN"] = data["refreshToken"]
+                save_tokens()
+                st.toast("✅ تم تحديث التوكنات تلقائيًا")
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def fetch_with_auth(url, params):
-    # طلب مع إعادة المحاولة عند 401 (تجديد التوكن فورًا ثم إعادة المحاولة)
+    # طلب مع إعادة المحاولة عند 401 (تجديد التوكن ثم إعادة المحاولة)
     resp = None
     for attempt in range(2):
         resp = requests.get(url, headers=build_headers(), params=params, timeout=30)
         if resp.status_code == 401 and attempt == 0:
-            if refresh_access_token(force=True):
+            if refresh_access_token():
                 continue
         return resp
     return resp
 
-
-# تجديد استباقي قبل أي طلبات - أول حاجة بتتنفذ في كل rerun
-ensure_token_fresh()
 
 # ==================== تنبيه تليجرام عند انتهاء الجلسة ====================
 TELEGRAM_BOT_TOKEN = st.secrets.get("TELEGRAM_BOT_TOKEN", "")
@@ -319,8 +288,7 @@ def get_riders():
 @st.cache_data(ttl=300)
 def get_tomorrow_shifts(rider_ids):
     # جلب شيفتات الغد لكل مندوب بالتوازي (10 في نفس الوقت بدل واحد ورا التاني)
-    # بنستخدم fetch_with_auth اللي بيعالج الـ 401 بنفسه (ومحمي بالـ lock) — من غير
-    # تعارض لو أكتر من ثريد حصلهم 401 في نفس اللحظة
+    # بنستخدم fetch_with_auth اللي بيعالج الـ 401 بنفسه — من غير refresh يدوي مكرر
     cairo_tz = ZoneInfo("Africa/Cairo")
     tomorrow = datetime.now(cairo_tz) + timedelta(days=1)
     params = {
@@ -444,28 +412,14 @@ if is_admin_url:
                 if not v:
                     return "(فاضي)"
                 return f"{v[:15]}...{v[-15:]} (طول: {len(v)})"
-            last_refresh_ts = TOKENS.get("last_refresh", 0)
-            last_refresh_str = (
-                datetime.fromtimestamp(last_refresh_ts, ZoneInfo("Africa/Cairo")).strftime("%Y-%m-%d %H:%M:%S")
-                if last_refresh_ts else "لسه ماحصلش تجديد"
-            )
             st.code(
                 f"BEARER_TOKEN: {mask(TOKENS.get('BEARER_TOKEN'))}\n"
                 f"DHH_TOKEN: {mask(TOKENS.get('DHH_TOKEN'))}\n"
                 f"CF_AUTHORIZATION: {mask(TOKENS.get('CF_AUTHORIZATION'))}\n"
                 f"CF_APP_SESSION: {mask(TOKENS.get('CF_APP_SESSION'))}\n"
                 f"REFRESH_TOKEN: {mask(TOKENS.get('REFRESH_TOKEN'))}\n"
-                f"آخر تجديد استباقي: {last_refresh_str}\n"
                 f"tokens.json موجود: {os.path.exists(TOKENS_FILE)}"
             )
-            if TOKENS.get("last_refresh_error"):
-                st.error(f"آخر خطأ تجديد:\n{TOKENS['last_refresh_error']}")
-        if st.button("🔁 جدد التوكن دلوقتي"):
-            if refresh_access_token(force=True):
-                st.success("✅ اتجدد بنجاح")
-            else:
-                st.error("❌ فشل التجديد - REFRESH_TOKEN غالبًا منتهي، محتاج تسجيل دخول جديد")
-                st.code(TOKENS.get("last_refresh_error", "مفيش تفاصيل خطأ متسجلة"))
         if st.button("🗑️ امسح tokens.json"):
             try:
                 if os.path.exists(TOKENS_FILE):
@@ -547,8 +501,6 @@ if is_admin_url and st.session_state.get("show_admin", False):
                         TOKENS["CF_AUTHORIZATION"] = new_cf_auth.strip()
                         updated = True
                     if updated:
-                        # تحديث يدوي من الأدمن = نعتبره تجديد ناجح، فبنسجل وقته
-                        TOKENS["last_refresh"] = time.time()
                         save_tokens()
                         st.cache_data.clear()
                         st.success("✅ تم تحديث القيم بنجاح")
@@ -642,8 +594,8 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab, performance_tab = st.tabs(
-    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned", "📊 Performance"]
+live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned"]
 )
 
 
@@ -711,33 +663,23 @@ with live_map_tab:
         st.session_state.map_filter_fallback = "all"
 
     current_label = filter_labels.get(st.session_state.map_filter_fallback, "الكل")
-
-    filter_col, search_col, spacer_col = st.columns([1, 1.4, 3.6])
-    with filter_col:
-        with st.popover(f"🔍 {current_label}"):
-            if hasattr(st, "pills"):
-                picked = st.pills(
-                    "فلترة الخريطة",
-                    options=filter_keys,
-                    format_func=lambda k: filter_labels[k],
-                    default=st.session_state.map_filter_fallback,
-                    label_visibility="collapsed",
-                    key="map_filter_pills",
-                )
-                if picked:
-                    st.session_state.map_filter_fallback = picked
-            else:
-                for key, label in filter_options:
-                    if st.button(label, key=f"pill_{key}", use_container_width=True):
-                        st.session_state.map_filter_fallback = key
-                        st.rerun()
-    with search_col:
-        map_search_id = st.text_input(
-            "دور بالـ ID",
-            key="map_search_rid",
-            label_visibility="collapsed",
-            placeholder="ID",
-        )
+    with st.popover(f"🔍 Filter: {current_label}", use_container_width=True):
+        if hasattr(st, "pills"):
+            picked = st.pills(
+                "فلترة الخريطة",
+                options=filter_keys,
+                format_func=lambda k: filter_labels[k],
+                default=st.session_state.map_filter_fallback,
+                label_visibility="collapsed",
+                key="map_filter_pills",
+            )
+            if picked:
+                st.session_state.map_filter_fallback = picked
+        else:
+            for key, label in filter_options:
+                if st.button(label, key=f"pill_{key}", use_container_width=True):
+                    st.session_state.map_filter_fallback = key
+                    st.rerun()
 
     selected_filter = st.session_state.map_filter_fallback
 
@@ -866,36 +808,11 @@ with live_map_tab:
 
         points.append([lat, lng])
 
-        # هايلايت المندوب اللي بندور عليه بالـ ID
-        if map_search_id.strip() and str(rider_id) == map_search_id.strip():
-            folium.CircleMarker(
-                location=[lat, lng],
-                radius=20,
-                color="#FF0000",
-                weight=3,
-                fill=False,
-            ).add_to(m)
-
     if len(points) == 1:
         m.location = points[0]
         m.zoom_start = 17
     elif points:
         m.fit_bounds(points)
-
-    # لو فيه بحث بالـ ID ولاقيناه، نزوم عليه بالأولوية
-    if map_search_id.strip():
-        search_point = next(
-            (
-                p for p, r in zip(points, filtered_riders)
-                if str(r.get("employee_id") or r.get("employeeId") or r.get("id")) == map_search_id.strip()
-            ),
-            None,
-        )
-        if search_point:
-            m.location = search_point
-            m.zoom_start = 17
-        else:
-            st.warning("مش لاقي مندوب بالـ ID ده على الخريطة دلوقتي")
 
     st_folium(m, use_container_width=True, height=700, key="riders_map", returned_objects=[])
 
@@ -1001,108 +918,6 @@ with unassigned_tab:
                 <tr>
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; width:100px;">ID</th>
                     <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-        """
-        st.markdown(table_html, unsafe_allow_html=True)
-
-with performance_tab:
-    def format_worked_time(seconds):
-        try:
-            seconds = int(seconds)
-        except (TypeError, ValueError):
-            return "00:00:00"
-        h = seconds // 3600
-        m = (seconds % 3600) // 60
-        s = seconds % 60
-        return f"{h:02d}:{m:02d}:{s:02d}"
-
-    MIN_SHIFT_AGE_SECONDS = 61 * 60  # ساعة ودقيقة - قبل كده مايتحسبش عليه UTR واطي
-
-    low_utr_riders = []
-    now_utc = datetime.now(ZoneInfo("UTC"))
-    for r in riders:
-        status_info = get_status_info(r.get("status"))
-        if status_info in ("Late 🔴", "Starting 🔵"):
-            continue
-
-        # استثناء المندوب اللي لسه بادئ شيفته من أقل من ساعة ودقيقة
-        shift_started_at = r.get("active_shift_started_at")
-        if shift_started_at:
-            try:
-                started_dt = datetime.fromisoformat(shift_started_at.replace("Z", "+00:00"))
-                shift_age_seconds = (now_utc - started_dt).total_seconds()
-                if shift_age_seconds < MIN_SHIFT_AGE_SECONDS:
-                    continue
-            except (ValueError, TypeError):
-                pass
-
-        perf = r.get("performance") or {}
-        utr = perf.get("utilization_rate")
-        if utr is None:
-            continue
-        try:
-            utr = float(utr)
-        except (TypeError, ValueError):
-            continue
-
-        if utr >= 1.0:
-            continue
-
-        rid = r.get("employee_id") or r.get("employeeId") or r.get("id")
-        name = r.get("name") or r.get("rider_name") or r.get("riderName") or "Unknown"
-        time_spent = perf.get("time_spent") or {}
-        worked_seconds = time_spent.get("worked_seconds", 0)
-        break_seconds = time_spent.get("break_seconds", 0)
-        late_seconds = time_spent.get("late_seconds", 0)
-        deliveries_info = r.get("deliveries_info") or {}
-        deliveries_count = deliveries_info.get("completed_deliveries_count", 0)
-
-        low_utr_riders.append(
-            {
-                "id": rid,
-                "name": name,
-                "utr": utr,
-                "worked": format_worked_time(worked_seconds),
-                "break": format_worked_time(break_seconds),
-                "late": format_worked_time(late_seconds),
-                "deliveries": deliveries_count,
-            }
-        )
-
-    # ترتيب من الأقل UTR للأعلى (الأسوأ أداءً في الأول)
-    low_utr_riders.sort(key=lambda x: x["utr"])
-
-    if not low_utr_riders:
-        st.success("✅ مفيش مناديب UTR بتاعهم أقل من 1.0 دلوقتي")
-    else:
-        rows_html = "".join(
-            f"<tr>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['id']}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{row['name']}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['utr']:.1f}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['worked']}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['break']}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['late']}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['deliveries']}</td>"
-            f"</tr>"
-            for row in low_utr_riders
-        )
-        table_html = f"""
-        <table style="border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; width:auto;">
-            <thead>
-                <tr>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; width:100px;">ID</th>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999;">UTR</th>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Time Worked</th>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Total Break</th>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Total Late</th>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999;">Deliveries</th>
                 </tr>
             </thead>
             <tbody>
