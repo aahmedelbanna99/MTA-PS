@@ -176,8 +176,13 @@ def refresh_access_token(force=False):
       الحقيقي بدل ما نكتم الخطأ.
     """
     with token_lock:
-        # حماية: لو ثريد تاني حدّث التوكن من أقل من دقيقة، متعملش تحديث زيادة
-        if not force and (time.time() - TOKENS.get("last_refresh", 0) < MIN_SECONDS_BETWEEN_REFRESH):
+        # حماية: لو ثريد تاني حدّث التوكن من ثواني قليلة، متعملش تحديث زيادة.
+        # للتجديد الاستباقي (force=False) الحماية 60 ثانية، وللتجديد الفوري
+        # عند 401 (force=True) حماية أقصر (5 ثواني) بس تكفي تمنع عشرات
+        # الطلبات المتوازية (زي فحص شيفتات 100+ مندوب مرة واحدة) من كل واحد
+        # فيهم يعمل تجديد حقيقي منفصل لوحده في نفس اللحظة.
+        guard_seconds = MIN_SECONDS_BETWEEN_REFRESH if not force else 5
+        if (time.time() - TOKENS.get("last_refresh", 0)) < guard_seconds:
             return True
 
         last_errors = []
@@ -222,6 +227,11 @@ def refresh_access_token(force=False):
                         TOKENS["REFRESH_TOKEN"] = data["refreshToken"]
                     TOKENS["last_refresh"] = time.time()
                     TOKENS["last_refresh_error"] = ""
+                    # نسجل الرد الخام ومفاتيحه عشان نتأكد هل الـ bearer فعلاً بيتجدد
+                    TOKENS["last_refresh_raw"] = (
+                        f"keys: {list(data.keys())} | bearer_updated: {bool(data.get('token'))} | "
+                        f"raw: {resp.text[:500]}"
+                    )
                     save_tokens()
                     st.toast("✅ تم تحديث التوكنات تلقائيًا")
                     return True
@@ -559,6 +569,8 @@ if is_admin_url:
             )
             if TOKENS.get("last_refresh_error"):
                 st.error(f"آخر خطأ تجديد:\n{TOKENS['last_refresh_error']}")
+            if TOKENS.get("last_refresh_raw"):
+                st.info(f"آخر رد ناجح من الـ refresh endpoint:\n{TOKENS['last_refresh_raw']}")
         if st.button("🔁 جدد التوكن دلوقتي"):
             if refresh_access_token(force=True):
                 st.success("✅ اتجدد بنجاح")
