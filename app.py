@@ -379,6 +379,43 @@ def get_tomorrow_shifts(rider_ids):
     return {r for r in results if r}
 
 
+def get_tomorrow_shifts_debug(rider_ids, sample_size=8):
+    # نسخة بدون كاش بتسجل سبب فشل أول كام مندوب - للتشخيص بس
+    cairo_tz = ZoneInfo("Africa/Cairo")
+    tomorrow = datetime.now(cairo_tz) + timedelta(days=1)
+    params = {
+        "city_id": 204,
+        "start_at": tomorrow.strftime("%Y-%m-%dT00:00:00.000Z"),
+        "end_at": tomorrow.strftime("%Y-%m-%dT23:59:59.999Z"),
+    }
+    base = "https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees"
+
+    def check(rid):
+        try:
+            resp = fetch_with_auth(f"{base}/{int(rid)}/shifts", params)
+            if resp.status_code != 200:
+                return None, f"ID {rid}: Status {resp.status_code}, Body: {resp.text[:150]}"
+            data = resp.json()
+            shifts = []
+            if isinstance(data, dict):
+                shifts = data.get("content") or data.get("data") or []
+            elif isinstance(data, list):
+                shifts = data
+            if shifts:
+                return int(rid), None
+            return None, f"ID {rid}: Status 200 بس من غير شيفتات"
+        except Exception as e:
+            return None, f"ID {rid}: Exception - {e}"
+
+    sample_ids = list(rider_ids)[:sample_size]
+    debug_log = []
+    for rid in sample_ids:
+        result, err = check(rid)
+        if err:
+            debug_log.append(err)
+    return debug_log
+
+
 # ==================== حالة الطيار ====================
 @st.cache_data(ttl=300)
 def get_office_roster():
@@ -1054,6 +1091,19 @@ with unassigned_tab:
         st.success("✅ كل مناديب المكتب حاططين شيفت بكرة")
     else:
         st.write(f"المناديب الي مش حاجزه شيفت بكره من المكتب كله : {len(missing_office)}")
+
+        # لو كل المكتب تقريبًا ظاهر كـ "مش حاجز"، ده على الأغلب خطأ مش حقيقة -
+        # نعرض عينة من سبب الفشل الفعلي بدل ما نعرض جدول غلط
+        if len(missing_office) >= max(1, int(len(office_rider_ids) * 0.9)):
+            st.warning("⚠️ العدد ده كبير جدًا وغالبًا فيه مشكلة في فحص الشيفتات مش إن كل المكتب فعلاً مش حاجز")
+            with st.expander("🔍 عينة من سبب الفشل (أول 8 مناديب)"):
+                debug_log = get_tomorrow_shifts_debug(missing_office)
+                if debug_log:
+                    for line in debug_log:
+                        st.code(line)
+                else:
+                    st.write("مفيش تفاصيل فشل - يمكن كلهم فعلاً من غير شيفتات")
+
         rows_html = "".join(
             f"<tr><td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{rid}</td>"
             f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{office_rider_names.get(rid, 'مش معروف الاسم')}</td></tr>"
