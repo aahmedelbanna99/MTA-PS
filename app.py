@@ -380,6 +380,34 @@ def get_tomorrow_shifts(rider_ids):
 
 
 # ==================== حالة الطيار ====================
+@st.cache_data(ttl=300)
+def get_office_roster():
+    # جلب كل مناديب المكتب (مش بس اللي ظاهرين دلوقتي على الخريطة) من شيت HC
+    HC_SHEET_ID = "1iFB0N9PSmL9QGw6Owa9jGbozrm7JBHIFmIRW3dpO_VQ"
+    csv_url = f"https://docs.google.com/spreadsheets/d/{HC_SHEET_ID}/export?format=csv"
+    try:
+        df = pd.read_csv(csv_url)
+    except Exception:
+        return [], {}
+
+    # نلاقي أعمدة الـ ID والاسم مهما كان اسمهم بالظبط (بحروف كبيرة/صغيرة)
+    id_col = next((c for c in df.columns if str(c).strip().lower() == "id"), None)
+    name_col = next((c for c in df.columns if str(c).strip().lower() == "name"), None)
+    if id_col is None or name_col is None:
+        return [], {}
+
+    office_ids = []
+    office_names = {}
+    for _, row in df.iterrows():
+        try:
+            rid = int(row[id_col])
+        except (TypeError, ValueError):
+            continue
+        office_ids.append(rid)
+        office_names[rid] = str(row[name_col]) if pd.notna(row[name_col]) else "Unknown"
+    return office_ids, office_names
+
+
 def get_status_info(raw_status):
     # تطبيع حالة الطيار وتحويلها إلى عرض ملوّن
     s = (raw_status or "").strip().lower().replace(" ", "_").replace(".", "")
@@ -420,6 +448,11 @@ tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
 st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
 missing_core = [rid for rid in rider_ids if rid not in tomorrow_rider_ids]
+
+# ==================== الغير حاجزين بكرة من المكتب كله (مش بس اللي ظاهرين دلوقتي) ====================
+office_rider_ids, office_rider_names = get_office_roster()
+tomorrow_office_rider_ids = get_tomorrow_shifts(office_rider_ids) if office_rider_ids else set()
+missing_office = [rid for rid in office_rider_ids if rid not in tomorrow_office_rider_ids]
 
 # ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
 # لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
@@ -1013,16 +1046,16 @@ with all_late_tab:
         st.info("🟢 No riders are currently late.")
 
 with unassigned_tab:
-    if not rider_ids:
-        st.info("مفيش مناديب ظاهرين دلوقتي على الخريطة عشان نتأكد من شيفتهم بكرة")
-    elif not missing_core:
-        st.success("✅ كل المناديب الظاهرين دلوقتي حاططين شيفت بكرة")
+    if not office_rider_ids:
+        st.info("مقدرش أجيب قايمة مناديب المكتب من شيت HC دلوقتي")
+    elif not missing_office:
+        st.success("✅ كل مناديب المكتب حاططين شيفت بكرة")
     else:
-        st.write(f"المناديب الي مش حاجزه شيفت بكره : {len(missing_core)}")
+        st.write(f"المناديب الي مش حاجزه شيفت بكره من المكتب كله : {len(missing_office)}")
         rows_html = "".join(
             f"<tr><td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{rid}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{rider_names_by_id.get(rid, 'مش معروف الاسم')}</td></tr>"
-            for rid in missing_core
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{office_rider_names.get(rid, 'مش معروف الاسم')}</td></tr>"
+            for rid in missing_office
         )
         table_html = f"""
         <table style="border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; width:auto;">
