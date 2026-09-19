@@ -35,6 +35,7 @@ st.markdown(
 # ==================== الرأس ====================
 header_cols = st.columns([1, 12])
 with header_cols[0]:
+    # لو اللوجو مش موجود أو تالف، نكمل من غير ما التطبيق يبوظ
     try:
         st.image("talabat.jpeg", width=120)
     except Exception:
@@ -46,6 +47,8 @@ with header_cols[1]:
     )
 
 # ==================== حماية الدخول (باسورد لأكتر من مشرف) ====================
+# القيمة في secrets.toml بتاخد كذا باسورد مفصولين بفاصلة، مثال:
+# SUPERVISOR_PASSWORDS = "باسورد_الأول,باسورد_التاني"
 SUPERVISOR_PASSWORDS = [
     p.strip()
     for p in st.secrets.get("SUPERVISOR_PASSWORDS", "").split(",")
@@ -70,20 +73,27 @@ if not st.session_state.authenticated:
 TOKENS_FILE = "tokens.json"
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "")
 
-REFRESH_INTERVAL_SECONDS = 90 * 60
-MIN_SECONDS_BETWEEN_REFRESH = 60
+# إعدادات التجديد الاستباقي
+REFRESH_INTERVAL_SECONDS = 90 * 60  # 90 دقيقة - نجدد قبل ما التوكن يموت
+MIN_SECONDS_BETWEEN_REFRESH = 60    # حماية من تكرار التحديث خلال أقل من دقيقة (لو أكتر من ثريد نادى في نفس اللحظة)
 
+# قفل عام يمنع أكتر من ثريد (زي طلبات get_tomorrow_shifts المتوازية) من عمل
+# refresh لنفس التوكن في نفس اللحظة
 token_lock = threading.Lock()
 
+# القيم الافتراضية من st.secrets إن وجدت
 TOKENS = {
     "BEARER_TOKEN": st.secrets.get("BEARER_TOKEN", ""),
     "DHH_TOKEN": st.secrets.get("DHH_TOKEN", ""),
     "REFRESH_TOKEN": st.secrets.get("REFRESH_TOKEN", ""),
+    # كوكيز Cloudflare (تبدأ من secrets، لكن ممكن تتحدث من لوحة الأدمن وتتحفظ في tokens.json)
     "CF_APP_SESSION": st.secrets.get("CF_APP_SESSION", ""),
     "CF_AUTHORIZATION": st.secrets.get("CF_AUTHORIZATION", ""),
+    # وقت آخر تجديد ناجح لـ BEARER/DHH (يونكس تايمستامب)
     "last_refresh": 0,
 }
 
+# tokens.json له الأولوية على st.secrets (بما فيها كوكيز Cloudflare بعد التعديل)
 if os.path.exists(TOKENS_FILE):
     try:
         with open(TOKENS_FILE, "r") as f:
@@ -103,6 +113,7 @@ if os.path.exists(TOKENS_FILE):
 
 
 def save_tokens():
+    # حفظ التوكنات في tokens.json
     try:
         with open(TOKENS_FILE, "w") as f:
             json.dump(TOKENS, f)
@@ -110,10 +121,9 @@ def save_tokens():
         pass
 
 
-# ==================== استقبال توكنز جديدة عن بُعد (من السكريبت - Auto Update) ====================
-# سكريبت Tampermonkey بيبعت طلب زي:
-# ?update_key=SECRET&bearer=...&dhh=...&cf_auth=...&refresh=...
-# لو المفتاح مطابق، بيحدث القيم فورًا من غير الحاجة لتسجيل دخول أو فتح Admin
+# ==================== استقبال توكنز جديدة عن بُعد (من السكريبت) ====================
+# لو الرابط فيه ?update_key=... مطابق للسر المتفق عليه، نحدّث التوكنز فورًا
+# ونوقف تنفيذ باقي الصفحة - من غير ما نحتاج نفتح Admin أو ننسخ ونلصق يدويًا
 _update_key = st.query_params.get("update_key")
 _expected_key = st.secrets.get("TOKEN_UPDATE_KEY", "")
 if _update_key and _expected_key and _update_key == _expected_key:
@@ -141,6 +151,7 @@ if _update_key and _expected_key and _update_key == _expected_key:
 
 
 def build_headers():
+    # بناء الهيدرز من قاموس التوكنات الحالي (مع كوكيز Cloudflare زي النسخة الأصلية)
     return {
         "Authorization": f"Bearer {TOKENS['BEARER_TOKEN']}",
         "Accept": "application/json",
@@ -155,12 +166,24 @@ def build_headers():
 
 
 def refresh_access_token(force=False):
+    """
+    تجديد BEARER_TOKEN / DHH_TOKEN / REFRESH_TOKEN عن طريق الـ refresh endpoint.
+    - محمي بـ lock عشان لو أكتر من ثريد (من ThreadPoolExecutor في get_tomorrow_shifts)
+      حاولوا يعملوا تجديد في نفس اللحظة، يحصل مرة واحدة بس.
+    - force=True معناها تجاهل حماية "دقيقة واحدة بين كل تجديد وتاني"
+      (بنستخدمها لما 401 يحصل فعليًا ولازم نرد بسرعة).
+    - بتسجل تفاصيل آخر فشل في TOKENS["last_refresh_error"] عشان نعرف السبب
+      الحقيقي بدل ما نكتم الخطأ.
+    """
     with token_lock:
+        # حماية: لو ثريد تاني حدّث التوكن من أقل من دقيقة، متعملش تحديث زيادة
         if not force and (time.time() - TOKENS.get("last_refresh", 0) < MIN_SECONDS_BETWEEN_REFRESH):
             return True
 
         last_errors = []
 
+        # بنجرب الأول من غير كوكيز Cloudflare، ولو مانفعش نجرب معاهم
+        # لو نجح من غيرهم، يبقى BEARER/DHH بيتجددوا حتى لو كوكيز Cloudflare ماتت
         for use_cf in (False, True):
             try:
                 headers = {
@@ -216,12 +239,19 @@ def refresh_access_token(force=False):
 
 
 def ensure_token_fresh():
+    """
+    تجديد استباقي: بتتنفذ في بداية كل تشغيل للصفحة (كل rerun بتاع Streamlit،
+    اللي بيحصل كل دقيقة بسبب st_autorefresh). لو عدى أكتر من
+    REFRESH_INTERVAL_SECONDS من آخر تجديد ناجح، نعمل تجديد قبل ما التوكن يموت
+    أصلاً - بدل ما نستنى الـ 401 يحصل.
+    """
     elapsed = time.time() - TOKENS.get("last_refresh", 0)
     if elapsed > REFRESH_INTERVAL_SECONDS:
         refresh_access_token(force=True)
 
 
 def fetch_with_auth(url, params):
+    # طلب مع إعادة المحاولة عند 401 (تجديد التوكن فورًا ثم إعادة المحاولة)
     resp = None
     for attempt in range(2):
         resp = requests.get(url, headers=build_headers(), params=params, timeout=30)
@@ -232,6 +262,7 @@ def fetch_with_auth(url, params):
     return resp
 
 
+# تجديد استباقي قبل أي طلبات - أول حاجة بتتنفذ في كل rerun
 ensure_token_fresh()
 
 # ==================== تنبيه تليجرام عند انتهاء الجلسة ====================
@@ -239,7 +270,7 @@ TELEGRAM_BOT_TOKEN = st.secrets.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = st.secrets.get("TELEGRAM_CHAT_ID", "")
 
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=1800)  # يبعت تنبيه واحد بس كل نص ساعة عشان ميكررش مع كل ريفريش
 def send_telegram_alert(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return False
@@ -257,6 +288,7 @@ def send_telegram_alert(message):
 # ==================== دوال جلب البيانات ====================
 @st.cache_data(ttl=60)
 def get_riders():
+    # جلب قائمة الطيارين من كل الصفحات (الـ API يعيد طيارين مكتب المستخدم فقط)
     url = (
         "https://eg.me.logisticsbackoffice.com/"
         "api/rider-live-operations/v1/external/city/204/riders"
@@ -303,10 +335,11 @@ def get_riders():
 
         all_riders.extend(batch)
 
+        # لو الصفحة أقل من 100 يبقى دي آخر صفحة
         if len(batch) < 100:
             break
         page += 1
-        if page > 20:
+        if page > 20:  # حماية من حلقة لا نهائية
             break
 
     return all_riders
@@ -314,6 +347,9 @@ def get_riders():
 
 @st.cache_data(ttl=300)
 def get_tomorrow_shifts(rider_ids):
+    # جلب شيفتات الغد لكل مندوب بالتوازي (10 في نفس الوقت بدل واحد ورا التاني)
+    # بنستخدم fetch_with_auth اللي بيعالج الـ 401 بنفسه (ومحمي بالـ lock) — من غير
+    # تعارض لو أكتر من ثريد حصلهم 401 في نفس اللحظة
     cairo_tz = ZoneInfo("Africa/Cairo")
     tomorrow = datetime.now(cairo_tz) + timedelta(days=1)
     params = {
@@ -345,6 +381,7 @@ def get_tomorrow_shifts(rider_ids):
 
 # ==================== حالة الطيار ====================
 def get_status_info(raw_status):
+    # تطبيع حالة الطيار وتحويلها إلى عرض ملوّن
     s = (raw_status or "").strip().lower().replace(" ", "_").replace(".", "")
     if s == "working":
         return "Working 🟢"
@@ -364,6 +401,7 @@ def get_status_info(raw_status):
 # ==================== جلب البيانات ====================
 riders = get_riders()
 
+# جلب مناديب الغد من اللايف نفسه (نفس endpoint المتصفح)
 rider_ids = []
 rider_names_by_id = {}
 for r in riders:
@@ -377,12 +415,14 @@ for r in riders:
     except (TypeError, ValueError):
         pass
 
+# نتأكد من شيفت بكرة لكل المناديب الظاهرين على الخريطة دلوقتي
 tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
 st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
 missing_core = [rid for rid in rider_ids if rid not in tomorrow_rider_ids]
 
 # ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
+# لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
 is_admin_url = st.query_params.get("admin") == "1"
 
 if is_admin_url:
@@ -482,6 +522,7 @@ if is_admin_url:
                 except Exception as e:
                     st.error(f"Exception: {e}")
 else:
+    # الوضع العادي: زرار الريفريش بس، من غير أي إشارة لوجود لوحة أدمن
     if st.button("🔄 Refresh"):
         st.cache_data.clear()
         st.rerun()
@@ -535,6 +576,7 @@ if is_admin_url and st.session_state.get("show_admin", False):
                         TOKENS["CF_AUTHORIZATION"] = new_cf_auth.strip()
                         updated = True
                     if updated:
+                        # تحديث يدوي من الأدمن = نعتبره تجديد ناجح، فبنسجل وقته
                         TOKENS["last_refresh"] = time.time()
                         save_tokens()
                         st.cache_data.clear()
@@ -597,8 +639,8 @@ with_order_count = 0
 without_order_count = 0
 break_riders = []
 late_riders = []
-temp_pause_riders = []
-temp_other_riders = []
+temp_pause_riders = []  # الدبابيس السودة (Temp بسبب Pause)
+temp_other_riders = []  # التمب بأي سبب تاني، هتتحط تحت تاب البريك
 
 for r in riders:
     total_riders += 1
@@ -635,6 +677,7 @@ live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab, performance_tab = st
 
 
 def rider_matches_filter(r, filt):
+    # هل الطيار مطابق للفلتر المختار؟
     if filt == "all":
         return True
     status_info = get_status_info(r.get("status"))
@@ -661,6 +704,7 @@ def rider_matches_filter(r, filt):
 
 # ==================== تبويب الخريطة ====================
 with live_map_tab:
+    # ---- شرائط الفلترة (Pills) بشكل غامق ----
     st.markdown(
         """
         <style>
@@ -851,6 +895,7 @@ with live_map_tab:
 
         points.append([lat, lng])
 
+        # هايلايت المندوب اللي بندور عليه بالـ ID
         if map_search_id.strip() and str(rider_id) == map_search_id.strip():
             folium.CircleMarker(
                 location=[lat, lng],
@@ -866,6 +911,7 @@ with live_map_tab:
     elif points:
         m.fit_bounds(points)
 
+    # لو فيه بحث بالـ ID ولاقيناه، نزوم عليه بالأولوية
     if map_search_id.strip():
         search_point = next(
             (
@@ -1004,7 +1050,7 @@ with performance_tab:
         s = seconds % 60
         return f"{h:02d}:{m:02d}:{s:02d}"
 
-    MIN_SHIFT_AGE_SECONDS = 61 * 60
+    MIN_SHIFT_AGE_SECONDS = 61 * 60  # ساعة ودقيقة - قبل كده مايتحسبش عليه UTR واطي
 
     low_utr_riders = []
     now_utc = datetime.now(ZoneInfo("UTC"))
@@ -1013,6 +1059,7 @@ with performance_tab:
         if status_info in ("Late 🔴", "Starting 🔵"):
             continue
 
+        # استثناء المندوب اللي لسه بادئ شيفته من أقل من ساعة ودقيقة
         shift_started_at = r.get("active_shift_started_at")
         if shift_started_at:
             try:
@@ -1056,6 +1103,7 @@ with performance_tab:
             }
         )
 
+    # ترتيب من الأقل UTR للأعلى (الأسوأ أداءً في الأول)
     low_utr_riders.sort(key=lambda x: x["utr"])
 
     if not low_utr_riders:
