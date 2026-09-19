@@ -671,8 +671,8 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab, performance_tab = st.tabs(
-    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned", "📊 Performance"]
+live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab, performance_tab, hc_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned", "📊 Performance", "🧮 H.C"]
 )
 
 
@@ -1140,4 +1140,9 @@ with performance_tab:
         </table>
         """
         st.markdown(table_html, unsafe_allow_html=True)
+
+with hc_tab:
+    HC_SHEET_ID = "1iFB0N9PSmL9QGw6Owa9jGbozrm7JBHIFmIRW3dpO_VQ"
+    hc_embed_url = f"https://docs.google.com/spreadsheets/d/{HC_SHEET_ID}/htmlembed"
+    st.components.v1.iframe(hc_embed_url, height=800, scrolling=True)
 
