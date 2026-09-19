@@ -387,14 +387,14 @@ def get_office_roster():
     csv_url = f"https://docs.google.com/spreadsheets/d/{HC_SHEET_ID}/export?format=csv"
     try:
         df = pd.read_csv(csv_url)
-    except Exception:
-        return [], {}
+    except Exception as e:
+        return [], {}, f"فشل قراءة الشيت: {e}"
 
     # نلاقي أعمدة الـ ID والاسم مهما كان اسمهم بالظبط (بحروف كبيرة/صغيرة)
     id_col = next((c for c in df.columns if str(c).strip().lower() == "id"), None)
     name_col = next((c for c in df.columns if str(c).strip().lower() == "name"), None)
     if id_col is None or name_col is None:
-        return [], {}
+        return [], {}, f"الأعمدة الموجودة فعليًا: {list(df.columns)}"
 
     office_ids = []
     office_names = {}
@@ -405,7 +405,7 @@ def get_office_roster():
             continue
         office_ids.append(rid)
         office_names[rid] = str(row[name_col]) if pd.notna(row[name_col]) else "Unknown"
-    return office_ids, office_names
+    return office_ids, office_names, ""
 
 
 def get_status_info(raw_status):
@@ -450,7 +450,7 @@ st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ل
 missing_core = [rid for rid in rider_ids if rid not in tomorrow_rider_ids]
 
 # ==================== الغير حاجزين بكرة من المكتب كله (مش بس اللي ظاهرين دلوقتي) ====================
-office_rider_ids, office_rider_names = get_office_roster()
+office_rider_ids, office_rider_names, office_roster_error = get_office_roster()
 tomorrow_office_rider_ids = get_tomorrow_shifts(office_rider_ids) if office_rider_ids else set()
 missing_office = [rid for rid in office_rider_ids if rid not in tomorrow_office_rider_ids]
 
@@ -1048,6 +1048,8 @@ with all_late_tab:
 with unassigned_tab:
     if not office_rider_ids:
         st.info("مقدرش أجيب قايمة مناديب المكتب من شيت HC دلوقتي")
+        if office_roster_error:
+            st.code(office_roster_error)
     elif not missing_office:
         st.success("✅ كل مناديب المكتب حاططين شيفت بكرة")
     else:
