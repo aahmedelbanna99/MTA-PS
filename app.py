@@ -496,11 +496,6 @@ st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ل
 
 missing_core = [rid for rid in rider_ids if rid not in tomorrow_rider_ids]
 
-# ==================== الغير حاجزين بكرة من المكتب كله (مش بس اللي ظاهرين دلوقتي) ====================
-office_rider_ids, office_rider_names, office_roster_error = get_office_roster()
-tomorrow_office_rider_ids = get_tomorrow_shifts(office_rider_ids) if office_rider_ids else set()
-missing_office = [rid for rid in office_rider_ids if rid not in tomorrow_office_rider_ids]
-
 # ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
 # لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
 is_admin_url = st.query_params.get("admin") == "1"
@@ -1095,31 +1090,16 @@ with all_late_tab:
         st.info("🟢 No riders are currently late.")
 
 with unassigned_tab:
-    if not office_rider_ids:
-        st.info("مقدرش أجيب قايمة مناديب المكتب من شيت HC دلوقتي")
-        if office_roster_error:
-            st.code(office_roster_error)
-    elif not missing_office:
-        st.success("✅ كل مناديب المكتب حاططين شيفت بكرة")
+    if not rider_ids:
+        st.info("مفيش مناديب ظاهرين دلوقتي على الخريطة عشان نتأكد من شيفتهم بكرة")
+    elif not missing_core:
+        st.success("✅ كل المناديب الظاهرين دلوقتي حاططين شيفت بكرة")
     else:
-        st.write(f"المناديب الي مش حاجزه شيفت بكره من المكتب كله : {len(missing_office)}")
-
-        # لو كل المكتب تقريبًا ظاهر كـ "مش حاجز"، ده على الأغلب خطأ مش حقيقة -
-        # نعرض عينة من سبب الفشل الفعلي بدل ما نعرض جدول غلط
-        if len(missing_office) >= max(1, int(len(office_rider_ids) * 0.9)):
-            st.warning("⚠️ العدد ده كبير جدًا وغالبًا فيه مشكلة في فحص الشيفتات مش إن كل المكتب فعلاً مش حاجز")
-            with st.expander("🔍 عينة من سبب الفشل (أول 8 مناديب)"):
-                debug_log = get_tomorrow_shifts_debug(missing_office)
-                if debug_log:
-                    for line in debug_log:
-                        st.code(line)
-                else:
-                    st.write("مفيش تفاصيل فشل - يمكن كلهم فعلاً من غير شيفتات")
-
+        st.write(f"المناديب الي مش حاجزه شيفت بكره : {len(missing_core)}")
         rows_html = "".join(
             f"<tr><td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{rid}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{office_rider_names.get(rid, 'مش معروف الاسم')}</td></tr>"
-            for rid in missing_office
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{rider_names_by_id.get(rid, 'مش معروف الاسم')}</td></tr>"
+            for rid in missing_core
         )
         table_html = f"""
         <table style="border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; width:auto;">
