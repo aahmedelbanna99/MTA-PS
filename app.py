@@ -1242,4 +1242,3 @@ with hc_tab:
     HC_SHEET_ID = "1iFB0N9PSmL9QGw6Owa9jGbozrm7JBHIFmIRW3dpO_VQ"
     hc_embed_url = f"https://docs.google.com/spreadsheets/d/{HC_SHEET_ID}/htmlembed"
     st.components.v1.iframe(hc_embed_url, height=800, scrolling=True)
-
