@@ -494,8 +494,6 @@ for r in riders:
 tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
 st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
-missing_core = [rid for rid in rider_ids if rid not in tomorrow_rider_ids]
-
 # ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
 # لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
 is_admin_url = st.query_params.get("admin") == "1"
@@ -748,8 +746,8 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab, all_late_tab, unassigned_tab, performance_tab, hc_tab = st.tabs(
-    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📋 Unassigned", "📊 Performance", "🧮 H.C"]
+live_map_tab, all_breaks_tab, all_late_tab, performance_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📊 Performance"]
 )
 
 
@@ -875,10 +873,6 @@ with live_map_tab:
             or r.get("employeeId")
             or r.get("id")
         )
-        try:
-            has_shift_tomorrow = int(rider_id) in tomorrow_rider_ids
-        except (TypeError, ValueError):
-            has_shift_tomorrow = False
 
         name = (
             r.get("name")
@@ -894,7 +888,6 @@ with live_map_tab:
             <b>Status:</b> {status_info}<br>
             <b>Wallet:</b> {(r.get('wallet_info') or {}).get('balance', 'N/A')}<br>
             <b>Has Active Order:</b> {'Yes 🟢' if has_active else 'No 🔴'}<br>
-            <b>Tomorrow Shift:</b> {'Yes ✅' if has_shift_tomorrow else 'No ❌'}<br>
             <b>Completed Orders:</b> {deliveries_info.get('completed_deliveries_count', deliveries_info.get('completed_deliveries', r.get('completed_orders', 0)))}<br>
             <b>Accepted Orders:</b> {deliveries_info.get('accepted_deliveries_count', deliveries_info.get('accepted_deliveries', r.get('accepted_orders', 0)))}
         </div>
@@ -1089,33 +1082,6 @@ with all_late_tab:
     else:
         st.info("🟢 No riders are currently late.")
 
-with unassigned_tab:
-    if not rider_ids:
-        st.info("مفيش مناديب ظاهرين دلوقتي على الخريطة عشان نتأكد من شيفتهم بكرة")
-    elif not missing_core:
-        st.success("✅ كل المناديب الظاهرين دلوقتي حاططين شيفت بكرة")
-    else:
-        st.write(f"المناديب الي مش حاجزه شيفت بكره : {len(missing_core)}")
-        rows_html = "".join(
-            f"<tr><td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{rid}</td>"
-            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{rider_names_by_id.get(rid, 'مش معروف الاسم')}</td></tr>"
-            for rid in missing_core
-        )
-        table_html = f"""
-        <table style="border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; width:auto;">
-            <thead>
-                <tr>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; width:100px;">ID</th>
-                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-        """
-        st.markdown(table_html, unsafe_allow_html=True)
-
 with performance_tab:
     def format_worked_time(seconds):
         try:
@@ -1218,7 +1184,3 @@ with performance_tab:
         """
         st.markdown(table_html, unsafe_allow_html=True)
 
-with hc_tab:
-    HC_SHEET_ID = "1iFB0N9PSmL9QGw6Owa9jGbozrm7JBHIFmIRW3dpO_VQ"
-    hc_embed_url = f"https://docs.google.com/spreadsheets/d/{HC_SHEET_ID}/htmlembed"
-    st.components.v1.iframe(hc_embed_url, height=800, scrolling=True)
