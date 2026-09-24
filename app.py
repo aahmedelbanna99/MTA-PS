@@ -355,106 +355,6 @@ def get_riders():
     return all_riders
 
 
-@st.cache_data(ttl=300)
-def get_tomorrow_shifts(rider_ids):
-    # جلب شيفتات الغد لكل مندوب بالتوازي (10 في نفس الوقت بدل واحد ورا التاني)
-    # بنستخدم fetch_with_auth اللي بيعالج الـ 401 بنفسه (ومحمي بالـ lock) — من غير
-    # تعارض لو أكتر من ثريد حصلهم 401 في نفس اللحظة
-    cairo_tz = ZoneInfo("Africa/Cairo")
-    tomorrow = datetime.now(cairo_tz) + timedelta(days=1)
-    params = {
-        "city_id": 204,
-        "start_at": tomorrow.strftime("%Y-%m-%dT00:00:00.000Z"),
-        "end_at": tomorrow.strftime("%Y-%m-%dT23:59:59.999Z"),
-    }
-    base = "https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees"
-
-    def check(rid):
-        try:
-            resp = fetch_with_auth(f"{base}/{int(rid)}/shifts", params)
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
-            shifts = []
-            if isinstance(data, dict):
-                shifts = data.get("content") or data.get("data") or []
-            elif isinstance(data, list):
-                shifts = data
-            return int(rid) if shifts else None
-        except Exception:
-            return None
-
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        results = list(ex.map(check, rider_ids))
-    return {r for r in results if r}
-
-
-def get_tomorrow_shifts_debug(rider_ids, sample_size=8):
-    # نسخة بدون كاش بتسجل سبب فشل أول كام مندوب - للتشخيص بس
-    cairo_tz = ZoneInfo("Africa/Cairo")
-    tomorrow = datetime.now(cairo_tz) + timedelta(days=1)
-    params = {
-        "city_id": 204,
-        "start_at": tomorrow.strftime("%Y-%m-%dT00:00:00.000Z"),
-        "end_at": tomorrow.strftime("%Y-%m-%dT23:59:59.999Z"),
-    }
-    base = "https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees"
-
-    def check(rid):
-        try:
-            resp = fetch_with_auth(f"{base}/{int(rid)}/shifts", params)
-            if resp.status_code != 200:
-                return None, f"ID {rid}: Status {resp.status_code}, Body: {resp.text[:150]}"
-            data = resp.json()
-            shifts = []
-            if isinstance(data, dict):
-                shifts = data.get("content") or data.get("data") or []
-            elif isinstance(data, list):
-                shifts = data
-            if shifts:
-                return int(rid), None
-            return None, f"ID {rid}: Status 200 بس من غير شيفتات"
-        except Exception as e:
-            return None, f"ID {rid}: Exception - {e}"
-
-    sample_ids = list(rider_ids)[:sample_size]
-    debug_log = []
-    for rid in sample_ids:
-        result, err = check(rid)
-        if err:
-            debug_log.append(err)
-    return debug_log
-
-
-# ==================== حالة الطيار ====================
-@st.cache_data(ttl=300)
-def get_office_roster():
-    # جلب كل مناديب المكتب (مش بس اللي ظاهرين دلوقتي على الخريطة) من شيت HC
-    HC_SHEET_ID = "1iFB0N9PSmL9QGw6Owa9jGbozrm7JBHIFmIRW3dpO_VQ"
-    csv_url = f"https://docs.google.com/spreadsheets/d/{HC_SHEET_ID}/export?format=csv"
-    try:
-        df = pd.read_csv(csv_url)
-    except Exception as e:
-        return [], {}, f"فشل قراءة الشيت: {e}"
-
-    # نلاقي أعمدة الـ ID والاسم مهما كان اسمهم بالظبط (بحروف كبيرة/صغيرة)
-    id_col = next((c for c in df.columns if str(c).strip().lower() == "id"), None)
-    name_col = next((c for c in df.columns if str(c).strip().lower() == "name"), None)
-    if id_col is None or name_col is None:
-        return [], {}, f"الأعمدة الموجودة فعليًا: {list(df.columns)}"
-
-    office_ids = []
-    office_names = {}
-    for _, row in df.iterrows():
-        try:
-            rid = int(row[id_col])
-        except (TypeError, ValueError):
-            continue
-        office_ids.append(rid)
-        office_names[rid] = str(row[name_col]) if pd.notna(row[name_col]) else "Unknown"
-    return office_ids, office_names, ""
-
-
 def get_status_info(raw_status):
     # تطبيع حالة الطيار وتحويلها إلى عرض ملوّن
     s = (raw_status or "").strip().lower().replace(" ", "_").replace(".", "")
@@ -489,10 +389,6 @@ for r in riders:
         )
     except (TypeError, ValueError):
         pass
-
-# نتأكد من شيفت بكرة لكل المناديب الظاهرين على الخريطة دلوقتي
-tomorrow_rider_ids = get_tomorrow_shifts(rider_ids)
-st.caption(f"📅 شيفتات بكرة: {len(tomorrow_rider_ids)} مندوب ليهم شيفت")
 
 # ==================== زر التحديث + لوحة الأدمن (مخفية إلا برابط سري) ====================
 # لوحة الأدمن بتظهر بس لو الرابط فيه ?admin=1 في الآخر
