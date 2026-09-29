@@ -356,6 +356,29 @@ def get_riders():
 
 
 @st.cache_data(ttl=300)
+@st.cache_data(ttl=300)
+def get_hc_sheet_ids():
+    # جلب قايمة الـ IDs المسموح بيها من شيت HC (العدد الفعلي الحقيقي)
+    HC_SHEET_ID = "1iFB0N9PSmL9QGw6Owa9jGbozrm7JBHIFmIRW3dpO_VQ"
+    csv_url = f"https://docs.google.com/spreadsheets/d/{HC_SHEET_ID}/export?format=csv"
+    try:
+        df = pd.read_csv(csv_url)
+    except Exception as e:
+        return None, f"فشل قراءة شيت HC: {e}"
+
+    id_col = next((c for c in df.columns if str(c).strip().lower() == "id"), None)
+    if id_col is None:
+        return None, f"مفيش عمود اسمه Id في الشيت - الأعمدة الموجودة: {list(df.columns)}"
+
+    ids = set()
+    for val in df[id_col]:
+        try:
+            ids.add(int(val))
+        except (TypeError, ValueError):
+            continue
+    return ids, ""
+
+
 def get_riders_with_batches():
     # جلب كل المناديب (ID + الاسم + رقم الباتش) من endpoint المناديب - مفلتر على بورسعيد بس
     url = "https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees"
@@ -1126,11 +1149,16 @@ with performance_tab:
 
 with batches_tab:
     batch_rows, batch_error = get_riders_with_batches()
+    hc_ids, hc_error = get_hc_sheet_ids()
+
     if batch_error:
         st.error(batch_error)
+    elif hc_error:
+        st.error(hc_error)
     elif not batch_rows:
         st.info("مفيش مناديب لعرضهم دلوقتي")
     else:
+        batch_rows = [row for row in batch_rows if row["id"] in hc_ids]
         st.write(f"عدد المناديب: **{len(batch_rows)}**")
         rows_html = "".join(
             f"<tr>"
