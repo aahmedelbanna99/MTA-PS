@@ -355,6 +355,50 @@ def get_riders():
     return all_riders
 
 
+@st.cache_data(ttl=300)
+def get_riders_with_batches():
+    # جلب كل المناديب (ID + الاسم + رقم الباتش) من endpoint المناديب - مفلتر على بورسعيد بس
+    url = "https://eg.me.logisticsbackoffice.com/api/rooster/v3/employees"
+    all_employees = []
+    page = 0
+    while True:
+        params = {
+            "filter_status": "active_contract",
+            "page": page,
+            "size": 100,
+            "with_contracts": "true",
+            "with_field": "id_number",
+            "search_city_name": "Port said",
+        }
+        resp = fetch_with_auth(url, params)
+        if resp.status_code != 200:
+            return [], f"خطأ {resp.status_code} في جلب المناديب"
+        try:
+            data = resp.json()
+        except Exception:
+            return [], "الـ API رجّع HTML بدل JSON — جلسة Cloudflare منتهية"
+
+        batch = data.get("content") or []
+        all_employees.extend(batch)
+
+        if len(batch) < 100:
+            break
+        page += 1
+        if page > 30:  # حماية من حلقة لا نهائية
+            break
+
+    rows = []
+    for emp in all_employees:
+        rows.append(
+            {
+                "id": emp.get("id"),
+                "name": emp.get("name", "Unknown"),
+                "batch": emp.get("batch_number", "N/A"),
+            }
+        )
+    return rows, ""
+
+
 def get_status_info(raw_status):
     # تطبيع حالة الطيار وتحويلها إلى عرض ملوّن
     s = (raw_status or "").strip().lower().replace(" ", "_").replace(".", "")
@@ -642,8 +686,8 @@ for r in riders:
         without_order_count += 1
 
 # ==================== التبويبات ====================
-live_map_tab, all_breaks_tab, all_late_tab, performance_tab = st.tabs(
-    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📊 Performance"]
+live_map_tab, all_breaks_tab, all_late_tab, performance_tab, batches_tab = st.tabs(
+    ["🗺️ Live Map", "☕ All Breaks", "🔴 All Late", "📊 Performance", "📦 Batches"]
 )
 
 
@@ -1080,3 +1124,34 @@ with performance_tab:
         """
         st.markdown(table_html, unsafe_allow_html=True)
 
+with batches_tab:
+    batch_rows, batch_error = get_riders_with_batches()
+    if batch_error:
+        st.error(batch_error)
+    elif not batch_rows:
+        st.info("مفيش مناديب لعرضهم دلوقتي")
+    else:
+        st.write(f"عدد المناديب: **{len(batch_rows)}**")
+        rows_html = "".join(
+            f"<tr>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['id']}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd; white-space:nowrap;'>{row['name']}</td>"
+            f"<td style='text-align:center; padding:8px 16px; border-bottom:1px solid #ddd;'>{row['batch']}</td>"
+            f"</tr>"
+            for row in batch_rows
+        )
+        table_html = f"""
+        <table style="border-collapse:collapse; font-family:Arial, sans-serif; font-size:14px; width:auto;">
+            <thead>
+                <tr>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; width:100px;">ID</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999; white-space:nowrap;">Name</th>
+                    <th style="text-align:center; padding:8px 16px; border-bottom:2px solid #999;">Batch</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+        """
+        st.markdown(table_html, unsafe_allow_html=True)
