@@ -1159,6 +1159,31 @@ with batches_tab:
         st.info("مفيش مناديب لعرضهم دلوقتي")
     else:
         batch_rows = [row for row in batch_rows if row["id"] in hc_ids]
+
+        # ---- أزرار فلترة الباتش ----
+        batch_filter_options = [
+            ("all", "الكل"),
+            ("1_6", "باتش 1 و 6"),
+            ("2", "باتش 2"),
+            ("3", "باتش 3"),
+            ("4", "باتش 4"),
+            ("5", "باتش 5"),
+        ]
+        if "batch_filter" not in st.session_state:
+            st.session_state.batch_filter = "all"
+
+        filter_cols = st.columns(len(batch_filter_options))
+        for i, (key, label) in enumerate(batch_filter_options):
+            with filter_cols[i]:
+                if st.button(label, key=f"batch_btn_{key}", use_container_width=True):
+                    st.session_state.batch_filter = key
+
+        selected_batch = st.session_state.batch_filter
+        if selected_batch == "1_6":
+            batch_rows = [row for row in batch_rows if str(row["batch"]) in ("1", "6")]
+        elif selected_batch != "all":
+            batch_rows = [row for row in batch_rows if str(row["batch"]) == selected_batch]
+
         st.write(f"عدد المناديب: **{len(batch_rows)}**")
         rows_html = "".join(
             f"<tr>"
